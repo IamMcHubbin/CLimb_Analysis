@@ -1,5 +1,7 @@
 # Climb Analysis
 
+[![CI](https://github.com/IamMcHubbin/CLimb_Analysis/actions/workflows/ci.yml/badge.svg)](https://github.com/IamMcHubbin/CLimb_Analysis/actions/workflows/ci.yml)
+
 Proof of concept: upload a climbing video, pick the climber, run 2D pose
 estimation over the clip, play it back with a skeleton overlay. The question
 this is meant to answer is whether tracking quality holds up on real climbing
@@ -35,6 +37,10 @@ Run the tests:
 ```bash
 .venv/bin/python -m pytest tests -q
 ```
+
+CI runs the same lint and tests on every push and pull request, and separately
+builds the Docker image and checks the container answers `/healthz` - which is
+the only thing that actually exercises the Dockerfile.
 
 ## How slow is this going to be?
 
@@ -224,8 +230,7 @@ No smoothing filter — the point is to see the raw jitter first.
 
 - No authentication, single container, CPU only.
 - Audio is stripped during normalisation; nothing here uses it.
-- The Docker image has not been built and run in this environment (no Docker
-  daemon available), though its system dependencies match what the application
-  was verified against here: `ffmpeg`, `libegl1`, `libgl1`, `libgles2`,
-  `libglib2.0-0`. MediaPipe 1.0.1 fails at import without the GL libraries even
+- The Docker image is built and smoke-tested in CI rather than locally. Its
+  system dependencies are `ffmpeg`, `libegl1`, `libgl1`, `libgles2` and
+  `libglib2.0-0`: MediaPipe 1.0.1 fails at import without the GL libraries even
   though it runs on CPU.

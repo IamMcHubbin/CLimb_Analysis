@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the running job irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the Dockerfile. The app needs 3.11+ for the type syntax.
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install system dependencies
+        # ffmpeg builds the test fixtures and does ingest normalisation. The GL
+        # libraries are what MediaPipe's native bindings link against even
+        # though everything here runs on CPU - without them the import fails.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg libegl1 libgl1 libgles2 libglib2.0-0
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt pyflakes
+
+      - name: Check ffmpeg is usable
+        run: |
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Lint
+        run: python -m pyflakes app scripts tests
+
+      - name: Check the pose runtime imports
+        # The test suite runs against stub estimators, so nothing else here
+        # would notice if the real MediaPipe path stopped loading.
+        run: |
+          python -c "
+          from app.pose.mediapipe_pose import LANDMARK_NAMES, LANDMARK_CONNECTIONS
+          print(f'{len(LANDMARK_NAMES)} landmarks, {len(LANDMARK_CONNECTIONS)} connections')
+          assert len(LANDMARK_NAMES) == 33
+          "
+
+      - name: Test
+        run: python -m pytest tests -q
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        # The image downloads pose models at build time, so this also proves
+        # the model host is reachable and the files are still where the code
+        # expects them.
+        run: docker build -t climb-analysis:ci .
+
+      - name: Check the container serves
+        run: |
+          docker run -d --name climb -p 8000:8000 climb-analysis:ci
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/healthz; then
+              echo
+              echo "container is serving"
+              docker rm -f climb
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "container did not become healthy"
+          docker logs climb
+          docker rm -f climb
+          exit 1
