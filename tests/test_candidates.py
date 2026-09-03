@@ -155,3 +155,71 @@ def test_video_with_no_frames_is_rejected(settings, repository, video):
     service = CandidateService(repository, settings, estimator_factory=_factory(FakeEstimator([])))
     with pytest.raises(ValueError):
         service.detect(empty)
+
+
+class SometimesEmptyEstimator(FakeEstimator):
+    """Finds nobody until it has been asked ``empty_for`` times.
+
+    Stands in for the clip where the middle frame is exactly where somebody
+    walked through the shot.
+    """
+
+    def __init__(self, people, empty_for: int):
+        super().__init__(people)
+        self._empty_for = empty_for
+
+    def detect(self, frame, timestamp_ms: int = 0):
+        self.calls += 1
+        if self.calls <= self._empty_for:
+            return ()
+        return tuple(self.people)
+
+
+def test_other_frames_are_tried_when_the_middle_has_nobody(settings, repository, video):
+    estimator = SometimesEmptyEstimator([_person(0.1, 0.1, 0.2)], empty_for=2)
+    service = CandidateService(repository, settings, estimator_factory=_factory(estimator))
+
+    result = service.detect(video)
+
+    assert estimator.calls == 3
+    assert len(result.candidates) == 1
+    # It reports the frame it actually found somebody in, not the one it wanted.
+    assert result.frame_index != service.default_frame_index(video)
+    assert service.frame_path(video).exists()
+
+
+def test_search_gives_up_and_reports_the_first_frame(settings, repository, video):
+    """A clip with nobody in it still yields a frame the client can show."""
+    estimator = FakeEstimator([])
+    service = CandidateService(repository, settings, estimator_factory=_factory(estimator))
+
+    result = service.detect(video)
+
+    assert result.candidates == ()
+    assert result.frame_index == service.default_frame_index(video)
+    assert estimator.calls > 1, "should have tried more than one frame"
+    assert service.frame_path(video).exists()
+
+
+def test_an_explicit_frame_is_never_second_guessed(settings, repository, video):
+    """The caller is steering; answering about a different frame would be worse."""
+    estimator = FakeEstimator([])
+    service = CandidateService(repository, settings, estimator_factory=_factory(estimator))
+
+    result = service.detect(video, frame_index=7)
+
+    assert result.frame_index == 7
+    assert result.candidates == ()
+    assert estimator.calls == 1
+
+
+def test_search_order_is_spread_across_the_clip(settings, repository, video):
+    service = CandidateService(repository, settings, estimator_factory=_factory(FakeEstimator([])))
+
+    order = service._search_order(video)
+
+    assert order[0] == service.default_frame_index(video)
+    assert len(order) == len(set(order)), "no frame tried twice"
+    assert all(0 <= index < video.frame_count for index in order)
+    # Spread widely enough that a two-second occlusion cannot swallow them all.
+    assert max(order) - min(order) > video.frame_count // 2
