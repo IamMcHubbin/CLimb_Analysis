@@ -6,7 +6,6 @@ data/
 models/
 *.mp4
 *.parquet
-
 *.db
 .DS_Store
 

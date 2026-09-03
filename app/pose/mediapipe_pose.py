@@ -19,6 +19,13 @@ _MP_RUNNING_MODES = {
 
 LANDMARK_NAMES: tuple[str, ...] = tuple(landmark.name.lower() for landmark in vision.PoseLandmark)
 
+# Skeleton topology, as (start, end) landmark index pairs. Sent to the client
+# so drawing code does not have to hardcode one model's joint layout.
+LANDMARK_CONNECTIONS: tuple[tuple[int, int], ...] = tuple(
+    (connection.start, connection.end)
+    for connection in vision.PoseLandmarksConnections.POSE_LANDMARKS
+)
+
 
 class MediaPipePoseEstimator(PoseEstimator):
     """Wraps PoseLandmarker.
@@ -54,6 +61,10 @@ class MediaPipePoseEstimator(PoseEstimator):
     @property
     def landmark_names(self) -> tuple[str, ...]:
         return LANDMARK_NAMES
+
+    @property
+    def landmark_connections(self) -> tuple[tuple[int, int], ...]:
+        return LANDMARK_CONNECTIONS
 
     def detect(self, frame_bgr: np.ndarray, timestamp_ms: int = 0) -> tuple[PersonPose, ...]:
         image = mp.Image(

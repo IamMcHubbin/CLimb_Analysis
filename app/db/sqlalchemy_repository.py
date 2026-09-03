@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import VideoRow
-from app.db.repository import Candidate, CandidateSet, VideoRecord, VideoRepository
+from app.db.models import JobRow, VideoRow
+from app.db.repository import (
+    Candidate,
+    CandidateSet,
+    JobRecord,
+    JobRepository,
+    JobStatus,
+    UnitOfWork,
+    VideoRecord,
+    VideoRepository,
+)
 from app.geometry import BoundingBox
 
 
@@ -52,16 +61,18 @@ def _decode_candidates(payload: str) -> CandidateSet:
     )
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """SQLite has no timezone type; timestamps are written as UTC."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 def _to_record(row: VideoRow) -> VideoRecord:
-    # SQLite has no timezone type, so timestamps come back naive. They are
-    # written as UTC, so that is what they are read back as.
-    created_at = row.created_at
-    if created_at is not None and created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
     return VideoRecord(
         id=row.id,
         original_filename=row.original_filename,
-        created_at=created_at,
+        created_at=_as_utc(row.created_at),
         stored_path=row.stored_path,
         width=row.width,
         height=row.height,
@@ -151,3 +162,98 @@ class SqlAlchemyVideoRepository(VideoRepository):
         self._session.delete(row)
         self._session.flush()
         return True
+
+
+def _to_job(row: JobRow) -> JobRecord:
+    return JobRecord(
+        id=row.id,
+        video_id=row.video_id,
+        candidate_index=row.candidate_index,
+        status=JobStatus(row.status),
+        progress=row.progress,
+        created_at=_as_utc(row.created_at),
+        started_at=_as_utc(row.started_at),
+        finished_at=_as_utc(row.finished_at),
+        error=row.error,
+    )
+
+
+class SqlAlchemyJobRepository(JobRepository):
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, job: JobRecord) -> JobRecord:
+        row = JobRow(
+            id=job.id,
+            video_id=job.video_id,
+            candidate_index=job.candidate_index,
+            status=job.status.value,
+            progress=job.progress,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            error=job.error,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_job(row)
+
+    def get(self, job_id: str) -> JobRecord | None:
+        row = self._session.get(JobRow, job_id)
+        return _to_job(row) if row is not None else None
+
+    def list_for_video(self, video_id: str, limit: int = 20) -> list[JobRecord]:
+        stmt = (
+            select(JobRow)
+            .where(JobRow.video_id == video_id)
+            .order_by(JobRow.created_at.desc(), JobRow.id.desc())
+            .limit(limit)
+        )
+        return [_to_job(row) for row in self._session.scalars(stmt)]
+
+    def _require(self, job_id: str) -> JobRow:
+        row = self._session.get(JobRow, job_id)
+        if row is None:
+            raise KeyError(job_id)
+        return row
+
+    def mark_running(self, job_id: str) -> None:
+        row = self._require(job_id)
+        row.status = JobStatus.RUNNING.value
+        row.started_at = datetime.now(timezone.utc)
+        self._session.flush()
+
+    def update_progress(self, job_id: str, progress: float) -> None:
+        row = self._require(job_id)
+        row.progress = min(1.0, max(0.0, progress))
+        self._session.flush()
+
+    def mark_done(self, job_id: str) -> None:
+        row = self._require(job_id)
+        row.status = JobStatus.DONE.value
+        row.progress = 1.0
+        row.finished_at = datetime.now(timezone.utc)
+        self._session.flush()
+
+    def mark_failed(self, job_id: str, error: str) -> None:
+        row = self._require(job_id)
+        row.status = JobStatus.FAILED.value
+        row.finished_at = datetime.now(timezone.utc)
+        row.error = error
+        self._session.flush()
+
+    def list_unfinished(self) -> list[JobRecord]:
+        stmt = (
+            select(JobRow)
+            .where(JobRow.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]))
+            .order_by(JobRow.created_at)
+        )
+        return [_to_job(row) for row in self._session.scalars(stmt)]
+
+
+class SqlAlchemyUnitOfWork(UnitOfWork):
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def commit(self) -> None:
+        self._session.commit()

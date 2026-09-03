@@ -15,16 +15,20 @@ from fastapi.responses import FileResponse
 from app.api.deps import (
     get_candidate_service,
     get_ingest_service,
+    get_job_service,
+    get_keypoint_store,
     get_settings,
     get_video_repository,
 )
-from app.api.schemas import CandidatesOut, VideoOut
+from app.api.schemas import AnalyseRequest, CandidatesOut, JobOut, KeypointsOut, VideoOut
 from app.candidates import CandidateService
 from app.config import Settings
 from app.db.repository import VideoRecord, VideoRepository
 from app.frames import FrameReadError
 from app.ingest.errors import IngestError, NormalisationFailed, UnreadableVideo
 from app.ingest.service import IngestService
+from app.jobs.service import JobService, UnknownCandidate
+from app.keypoints import KeypointStore
 from app.ingest.upload import EmptyUpload, UploadTooLarge, save_stream
 
 logger = logging.getLogger(__name__)
@@ -66,7 +70,7 @@ async def upload_video(
         except NormalisationFailed as exc:
             logger.exception("normalisation failed for %s", file.filename)
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"could not normalise this video: {exc}",
             ) from exc
     except UploadTooLarge as exc:
@@ -81,7 +85,7 @@ async def upload_video(
         ) from exc
     except IngestError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     finally:
@@ -156,7 +160,7 @@ def get_candidates(
             candidate_set = service.get_or_detect(record, frame_index)
     except FrameReadError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"could not read that frame: {exc}",
         ) from exc
     return CandidatesOut.from_set(record, candidate_set)
@@ -177,3 +181,73 @@ def get_candidate_frame(
             detail="no candidate frame yet; call /candidates first",
         )
     return FileResponse(path, media_type="image/jpeg")
+
+
+@router.post("/{video_id}/analyse", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def analyse_video(
+    video_id: str,
+    request: AnalyseRequest,
+    repository: VideoRepository = Depends(get_video_repository),
+    service: JobService = Depends(get_job_service),
+) -> JobOut:
+    """Queue analysis of one candidate and return immediately.
+
+    Poll GET /jobs/{id} for progress. Analysis takes roughly as long as the
+    clip itself, so nothing useful can be returned synchronously.
+    """
+    _require_video(repository, video_id)
+    try:
+        job = service.submit(video_id, request.candidate_index)
+    except UnknownCandidate as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return JobOut.from_record(job)
+
+
+@router.get("/{video_id}/keypoints", response_model=KeypointsOut)
+def get_keypoints(
+    video_id: str,
+    repository: VideoRepository = Depends(get_video_repository),
+    store: KeypointStore = Depends(get_keypoint_store),
+) -> KeypointsOut:
+    """The finished track, index-aligned with the video's frames."""
+    record = _require_video(repository, video_id)
+    if record.keypoints_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="this video has not been analysed yet",
+        )
+    data = store.read(record.keypoints_path)
+
+    # Rounded to four decimals: that is a fifth of a pixel at 1280 wide, and it
+    # roughly halves the size of the response for a long clip.
+    frames: list[list[list[float]] | None] = []
+    match_iou: list[float | None] = []
+    for index in range(data.metadata.frame_count):
+        landmarks = data.frames.get(index)
+        if landmarks is None:
+            frames.append(None)
+            match_iou.append(None)
+            continue
+        match_iou.append(round(data.ious.get(index, 0.0), 3))
+        frames.append(
+            [
+                [round(landmark.x, 4), round(landmark.y, 4), round(landmark.visibility, 3)]
+                for landmark in landmarks
+            ]
+        )
+
+    return KeypointsOut(
+        video_id=record.id,
+        fps=data.metadata.fps,
+        frame_count=data.metadata.frame_count,
+        landmark_names=list(data.metadata.landmark_names),
+        landmark_connections=[list(pair) for pair in data.metadata.landmark_connections],
+        pose_model=data.metadata.pose_model,
+        min_iou=data.metadata.min_iou,
+        tracked_frame_count=data.tracked_frame_count,
+        gap_frame_count=data.gap_frame_count,
+        frames=frames,
+        match_iou=match_iou,
+    )

@@ -12,11 +12,19 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.config import Settings, settings as app_settings
-from app.db.repository import VideoRepository
+from app.db.repository import JobRepository, UnitOfWork, VideoRepository
 from app.db.session import session_scope
-from app.db.sqlalchemy_repository import SqlAlchemyVideoRepository
+from app.db.sqlalchemy_repository import (
+    SqlAlchemyJobRepository,
+    SqlAlchemyUnitOfWork,
+    SqlAlchemyVideoRepository,
+)
 from app.candidates import CandidateService, EstimatorFactory
 from app.ingest.service import IngestService
+from app.jobs.base import JobQueue
+from app.jobs.runtime import get_queue
+from app.jobs.service import JobService
+from app.keypoints import KeypointStore, ParquetKeypointStore
 from app.pose import RunningMode, create_pose_estimator
 
 
@@ -61,3 +69,28 @@ def get_candidate_service(
     estimator_factory: EstimatorFactory = Depends(get_estimator_factory),
 ) -> CandidateService:
     return CandidateService(repository, settings=settings, estimator_factory=estimator_factory)
+
+
+def get_job_repository(session: Session = Depends(get_session)) -> JobRepository:
+    return SqlAlchemyJobRepository(session)
+
+
+def get_job_queue() -> JobQueue:
+    return get_queue()
+
+
+def get_unit_of_work(session: Session = Depends(get_session)) -> UnitOfWork:
+    return SqlAlchemyUnitOfWork(session)
+
+
+def get_job_service(
+    jobs: JobRepository = Depends(get_job_repository),
+    videos: VideoRepository = Depends(get_video_repository),
+    queue: JobQueue = Depends(get_job_queue),
+    unit_of_work: UnitOfWork = Depends(get_unit_of_work),
+) -> JobService:
+    return JobService(jobs, videos, queue, unit_of_work)
+
+
+def get_keypoint_store(settings: Settings = Depends(get_settings)) -> KeypointStore:
+    return ParquetKeypointStore(settings)

@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.db.repository import CandidateSet, VideoRecord
+from app.db.repository import CandidateSet, JobRecord, JobStatus, VideoRecord
 
 
 class SourceInfo(BaseModel):
@@ -106,3 +106,60 @@ class CandidatesOut(BaseModel):
                 for candidate in candidate_set.candidates
             ],
         )
+
+
+class AnalyseRequest(BaseModel):
+    """Which of the detected people to follow."""
+
+    candidate_index: int
+
+
+class JobOut(BaseModel):
+    id: str
+    video_id: str
+    candidate_index: int
+    status: JobStatus
+    # 0-1 over the frames processed so far.
+    progress: float
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+
+    @classmethod
+    def from_record(cls, job: JobRecord) -> "JobOut":
+        return cls(
+            id=job.id,
+            video_id=job.video_id,
+            candidate_index=job.candidate_index,
+            status=job.status,
+            progress=job.progress,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            error=job.error,
+        )
+
+
+class KeypointsOut(BaseModel):
+    """A finished track, laid out for drawing.
+
+    ``frames`` is index-aligned with the video: entry N is frame N, and a null
+    entry is a gap the tracker could not fill. Each present entry is a list of
+    [x, y, visibility] per landmark, normalised 0-1 against the frame.
+    """
+
+    video_id: str
+    fps: float
+    frame_count: int
+    landmark_names: list[str]
+    landmark_connections: list[list[int]]
+    pose_model: str
+    min_iou: float
+    tracked_frame_count: int
+    gap_frame_count: int
+    frames: list[list[list[float]] | None]
+    # The tracker's IoU against the previous frame, per frame; null on gaps.
+    # Exposed because how confident each match was is the question the whole
+    # proof of concept is asking.
+    match_iou: list[float | None]

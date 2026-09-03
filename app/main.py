@@ -10,20 +10,42 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routes_jobs import router as jobs_router
 from app.api.routes_videos import router as videos_router
 from app.config import settings
-from app.db.session import init_db
+from app.db.session import init_db, session_scope
+from app.db.sqlalchemy_repository import SqlAlchemyJobRepository
+from app.jobs.runtime import build_queue, set_queue
+from app.jobs.service import recover_unfinished_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
+SHUTDOWN_GRACE_SECONDS = 30
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings.ensure_dirs()
     init_db(settings)
-    yield
+
+    queue = build_queue(settings)
+    set_queue(queue)
+    # Before starting the worker: a job left running by the last process is
+    # dead, and a job left queued never ran. Sorting that out first means the
+    # worker never sees a job whose row disagrees with reality.
+    with session_scope() as session:
+        recover_unfinished_jobs(SqlAlchemyJobRepository(session), queue)
+    queue.start()
+    try:
+        yield
+    finally:
+        # Give the in-flight job a chance to record how it ended rather than
+        # leaving its row stuck at "running".
+        queue.stop(timeout=SHUTDOWN_GRACE_SECONDS)
+        set_queue(None)
 
 
 def create_app() -> FastAPI:
@@ -34,6 +56,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(videos_router)
+    app.include_router(jobs_router)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:

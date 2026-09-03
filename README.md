@@ -5,10 +5,9 @@ estimation over the clip, play it back with a skeleton overlay. The question
 this is meant to answer is whether tracking quality holds up on real climbing
 footage — not to produce metrics or coaching feedback.
 
-**Current state: the ingest path and a pose benchmark.** Upload, ffmpeg
-normalisation, metadata in SQLite, and a script that times pose estimation so
-the cost of the rest of the build is known up front. Candidate selection, the
-job queue, tracking, keypoint storage and the overlay are not built yet.
+**Current state: the loop closes.** Upload a clip, pick a person out of a
+mid-clip frame, watch the job run, then scrub the video with the skeleton drawn
+on top. No smoothing, no metrics, no hold detection.
 
 ---
 
@@ -80,6 +79,43 @@ Reproduce, with your own clip or a generated one:
     --video clip.mp4 --normalise --models lite,full,heavy --num-poses 5 \
     --repeats 3 --json results.json
 ```
+
+## How it works
+
+```
+POST /videos            ffmpeg normalise -> row in SQLite
+GET  /videos/{id}/candidates    pose on one frame -> numbered boxes + a JPEG
+POST /videos/{id}/analyse       queue a job for the chosen box -> job id
+GET  /jobs/{id}                 status and percent complete
+GET  /videos/{id}/keypoints     the finished track, index-aligned with frames
+```
+
+Four decisions are load-bearing:
+
+**Candidates are stored, not recomputed.** The index a user picks only means
+something against the exact detection run that produced it, so re-detecting
+would renumber the options underneath someone mid-choice. The chosen box is
+also what seeds tracking.
+
+**The track is grown outwards from the seed frame.** The climber is picked in
+the middle of the clip, but the track has to cover all of it, and where that
+person stood at frame 0 is unknown. So the clip is decoded once, forwards:
+frames from the seed onward are tracked as they are decoded, and detections
+before the seed are buffered and tracked backwards afterwards. Every frame gets
+exactly one pose inference. The buffer holds the first part of the clip, which
+is what bounds how long a video this handles comfortably.
+
+**An unmatched frame is a gap, and stays one.** Nothing is interpolated across
+it and the tracker never falls back to the nearest box. On a wall the wrong
+person is often the closest one - a spotter directly below, a queue at the base
+- so snapping would produce a track that looks plausible and is wrong. Gaps are
+absent rows in the parquet file and nulls in the API response, and the overlay
+draws nothing for them.
+
+**A job is committed before its id is queued.** The worker is another thread
+with its own session; an id published inside an open transaction points at a
+job that thread cannot see. This was a real bug, found by running the thing
+rather than by testing it.
 
 ## Ingest
 

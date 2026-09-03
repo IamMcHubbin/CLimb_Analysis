@@ -4,155 +4,397 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Climb Analysis</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
-    --bg: #14161a;
-    --panel: #1c1f26;
-    --line: #2c313b;
-    --text: #e6e8ec;
-    --muted: #939aa8;
-    --accent: #5b9cf6;
-    --warn: #e0a33e;
+    --bg: #14161a; --panel: #1c1f26; --line: #2c313b;
+    --text: #e6e8ec; --muted: #939aa8; --accent: #5b9cf6;
+    --warn: #e0a33e; --bad: #f2867d; --good: #63c08a;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 32px 20px;
-    background: var(--bg); color: var(--text);
+    margin: 0; padding: 32px 20px; background: var(--bg); color: var(--text);
     font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  main { max-width: 860px; margin: 0 auto; }
+  main { max-width: 900px; margin: 0 auto; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
   section {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 20px; margin-bottom: 18px;
   }
+  section[hidden] { display: none; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
        color: var(--muted); margin: 0 0 14px; font-weight: 600; }
-  input[type=file] { color: var(--muted); max-width: 100%; }
   button {
     background: var(--accent); color: #0d1017; border: 0; border-radius: 6px;
     padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
-  button:disabled { opacity: .5; cursor: default; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  input[type=file] { color: var(--muted); max-width: 100%; }
   .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .status { margin-top: 12px; font-size: 14px; color: var(--muted); min-height: 20px; }
-  .status.error { color: #f2867d; }
+  .status.error { color: var(--bad); }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  td { padding: 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td { padding: 6px 0; border-bottom: 1px solid var(--line); }
   td:first-child { color: var(--muted); width: 45%; }
-  video { width: 100%; border-radius: 8px; background: #000; display: block; }
   .flag { color: var(--warn); }
-  .hidden { display: none; }
-  .todo { color: var(--muted); font-size: 14px; margin: 0; }
-  code { background: #0f1116; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+
+  /* Candidate picker: boxes are positioned in percentages, so they track the
+     image at whatever size it renders. */
+  .frame-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+  .frame-wrap img { max-width: 100%; border-radius: 8px; }
+  .cand {
+    position: absolute; border: 2px solid var(--accent); border-radius: 3px;
+    cursor: pointer; background: rgba(91,156,246,.12);
+  }
+  .cand:hover { background: rgba(91,156,246,.28); }
+  .cand.selected { border-color: var(--good); background: rgba(99,192,138,.25); }
+  .cand span {
+    position: absolute; top: -1px; left: -1px; background: var(--accent);
+    color: #0d1017; font: 700 12px/1 system-ui; padding: 3px 6px; border-radius: 3px 0 3px 0;
+  }
+  .cand.selected span { background: var(--good); }
+
+  .bar { height: 8px; background: #0f1116; border-radius: 4px; overflow: hidden; margin-top: 12px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+
+  /* The canvas sits exactly on the video; the video keeps its own controls. */
+  .stage { position: relative; line-height: 0; }
+  .stage video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  .hud {
+    display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px;
+    font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+  }
+  .hud b { color: var(--text); font-weight: 600; }
+  .hud .gap { color: var(--warn); }
+  .toggle { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Climb Analysis</h1>
-  <p class="sub">Pose analysis for climbing video &mdash; ingest only so far.</p>
+  <p class="sub">Upload a clip, pick the climber, watch the skeleton. Raw output &mdash; no smoothing.</p>
 
-  <section>
-    <h2>Upload</h2>
+  <section id="s-upload">
+    <h2>1 &middot; Upload</h2>
     <div class="row">
       <input type="file" id="file" accept="video/*">
       <button id="upload" disabled>Upload &amp; normalise</button>
     </div>
-    <div class="status" id="status"></div>
+    <div class="status" id="upload-status"></div>
+    <table id="meta" hidden></table>
   </section>
 
-  <section id="result" class="hidden">
-    <h2>Normalised video</h2>
-    <video id="player" controls playsinline></video>
-    <table id="meta"></table>
+  <section id="s-pick" hidden>
+    <h2>2 &middot; Which one is the climber?</h2>
+    <div class="frame-wrap" id="frame-wrap"><img id="cand-frame" alt="Frame from the middle of the clip"></div>
+    <div class="status" id="pick-status"></div>
+    <div class="row" style="margin-top:12px">
+      <button id="analyse" disabled>Analyse this person</button>
+      <button id="other-frame" class="secondary">Try another frame</button>
+    </div>
   </section>
 
-  <section>
-    <h2>Not built yet</h2>
-    <p class="todo">
-      Candidate picker, analysis job progress and the skeleton overlay come next.
-      The <code>&lt;canvas&gt;</code> overlay will sit on top of the player above.
-    </p>
+  <section id="s-progress" hidden>
+    <h2>3 &middot; Analysing</h2>
+    <div class="status" id="job-status"></div>
+    <div class="bar"><i id="job-bar"></i></div>
+  </section>
+
+  <section id="s-play" hidden>
+    <h2>4 &middot; Playback</h2>
+    <div class="stage">
+      <video id="player" controls playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="hud">
+      <span>frame <b id="hud-frame">0</b>/<b id="hud-total">0</b></span>
+      <span id="hud-state">&mdash;</span>
+      <span>match IoU <b id="hud-iou">&mdash;</b></span>
+      <span>tracked <b id="hud-tracked">0</b>, gaps <b id="hud-gaps">0</b></span>
+      <label class="toggle"><input type="checkbox" id="show-gaps" checked> flag gaps</label>
+    </div>
   </section>
 </main>
 
 <script>
-const fileInput = document.getElementById('file');
-const uploadButton = document.getElementById('upload');
-const statusLine = document.getElementById('status');
-const resultPanel = document.getElementById('result');
-const player = document.getElementById('player');
-const metaTable = document.getElementById('meta');
+const $ = (id) => document.getElementById(id);
 
-fileInput.addEventListener('change', () => {
-  uploadButton.disabled = fileInput.files.length === 0;
-  setStatus('');
+const state = {
+  video: null,        // metadata from POST /videos
+  candidates: null,   // response from GET /candidates
+  selected: null,     // chosen candidate index
+  keypoints: null,    // response from GET /keypoints
+  pollTimer: null,
+};
+
+// ---------------------------------------------------------------- helpers
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const payload = response.status === 204 ? null : await response.json();
+  if (!response.ok) throw new Error((payload && payload.detail) || `${path} failed (${response.status})`);
+  return payload;
+}
+
+function setStatus(id, text, isError = false) {
+  const el = $(id);
+  el.textContent = text;
+  el.classList.toggle('error', isError);
+}
+
+function show(id, visible = true) { $(id).hidden = !visible; }
+
+// ---------------------------------------------------------------- 1. upload
+
+$('file').addEventListener('change', () => {
+  $('upload').disabled = $('file').files.length === 0;
+  setStatus('upload-status', '');
 });
 
-uploadButton.addEventListener('click', upload);
-
-function setStatus(text, isError = false) {
-  statusLine.textContent = text;
-  statusLine.classList.toggle('error', isError);
-}
-
-function formatBytes(bytes) {
-  const mb = bytes / (1024 * 1024);
-  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} kB`;
-}
-
-async function upload() {
-  const file = fileInput.files[0];
+$('upload').addEventListener('click', async () => {
+  const file = $('file').files[0];
   if (!file) return;
-
-  uploadButton.disabled = true;
-  resultPanel.classList.add('hidden');
-  // Normalisation is a transcode, so this is not instant on a long clip.
-  setStatus(`Uploading and normalising ${file.name} — this transcodes the whole clip…`);
+  $('upload').disabled = true;
+  ['s-pick', 's-progress', 's-play'].forEach((id) => show(id, false));
+  // Normalisation transcodes the whole clip, so this is not instant.
+  setStatus('upload-status', `Uploading and normalising ${file.name}…`);
 
   const body = new FormData();
   body.append('file', file);
-
   try {
-    const response = await fetch('/videos', { method: 'POST', body });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.detail || `upload failed (${response.status})`);
-    }
-    setStatus(`Done. Video id ${payload.id}`);
-    render(payload);
+    state.video = await api('/videos', { method: 'POST', body });
+    setStatus('upload-status', `Stored as ${state.video.id}`);
+    renderMeta(state.video);
+    await loadCandidates();
   } catch (error) {
-    setStatus(error.message, true);
+    setStatus('upload-status', error.message, true);
   } finally {
-    uploadButton.disabled = false;
+    $('upload').disabled = false;
+  }
+});
+
+function renderMeta(video) {
+  const source = video.source;
+  const rows = [
+    ['Normalised to', `${video.width}×${video.height}, ${video.fps} fps`],
+    ['Frames', `${video.frame_count} (${video.duration_seconds.toFixed(2)}s)`],
+    ['Source rotation flag', source.rotation
+      ? `<span class="flag">${source.rotation}° — baked into the pixels</span>` : 'none'],
+    ['Source frame timing', source.variable_frame_rate
+      ? '<span class="flag">variable — retimed to constant</span>' : 'constant'],
+  ];
+  $('meta').innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  $('meta').hidden = false;
+}
+
+// ------------------------------------------------------------ 2. candidates
+
+async function loadCandidates(frameIndex) {
+  setStatus('pick-status', 'Detecting people…');
+  show('s-pick', true);
+  const query = frameIndex === undefined ? '' : `?frame_index=${frameIndex}&refresh=true`;
+  try {
+    state.candidates = await api(`/videos/${state.video.id}/candidates${query}`);
+  } catch (error) {
+    setStatus('pick-status', error.message, true);
+    return;
+  }
+  state.selected = null;
+  $('analyse').disabled = true;
+  renderCandidates();
+}
+
+function renderCandidates() {
+  const data = state.candidates;
+  $('cand-frame').src = `${data.frame_url}?t=${Date.now()}`;
+
+  const wrap = $('frame-wrap');
+  wrap.querySelectorAll('.cand').forEach((el) => el.remove());
+  data.candidates.forEach((candidate) => {
+    const box = candidate.bounding_box;
+    const el = document.createElement('div');
+    el.className = 'cand';
+    // Percentages, so the boxes stay aligned however the image is scaled.
+    el.style.left = `${box.x * 100}%`;
+    el.style.top = `${box.y * 100}%`;
+    el.style.width = `${box.width * 100}%`;
+    el.style.height = `${box.height * 100}%`;
+    el.innerHTML = `<span>${candidate.index}</span>`;
+    el.addEventListener('click', () => selectCandidate(candidate.index));
+    wrap.appendChild(el);
+  });
+
+  const count = data.candidates.length;
+  if (count === 0) {
+    setStatus('pick-status',
+      `Nobody detected in frame ${data.frame_index}. Try another frame.`, true);
+  } else {
+    setStatus('pick-status',
+      `${count} ${count === 1 ? 'person' : 'people'} in frame ${data.frame_index} ` +
+      `(${data.timestamp_seconds.toFixed(1)}s). Click the climber.`);
+    if (count === 1) selectCandidate(0);
   }
 }
 
-function render(video) {
-  player.src = `/videos/${video.id}/file`;
+function selectCandidate(index) {
+  state.selected = index;
+  $('frame-wrap').querySelectorAll('.cand').forEach((el, position) => {
+    el.classList.toggle('selected', position === index);
+  });
+  $('analyse').disabled = false;
+}
 
-  const source = video.source;
-  const rotationNote = source.rotation
-    ? `<span class="flag">${source.rotation}° — baked into the pixels</span>`
-    : 'none';
-  const vfrNote = source.variable_frame_rate
-    ? '<span class="flag">variable — retimed to constant</span>'
-    : 'constant';
+$('other-frame').addEventListener('click', () => {
+  const total = state.video.frame_count;
+  const current = state.candidates ? state.candidates.frame_index : Math.floor(total / 2);
+  // Step a second further in, wrapping, so repeated clicks sample the clip.
+  const next = (current + Math.round(state.video.fps)) % total;
+  loadCandidates(next);
+});
 
-  const rows = [
-    ['Stored as', `${video.width}×${video.height}, ${video.fps} fps`],
-    ['Frames', `${video.frame_count} (${video.duration_seconds.toFixed(2)}s)`],
-    ['Size', formatBytes(video.size_bytes)],
-    ['Source dimensions', `${source.width}×${source.height} ${source.codec}`],
-    ['Source rotation flag', rotationNote],
-    ['Source frame timing', vfrNote],
-  ];
+// -------------------------------------------------------------- 3. analysis
 
-  metaTable.innerHTML = rows
-    .map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`)
-    .join('');
-  resultPanel.classList.remove('hidden');
+$('analyse').addEventListener('click', async () => {
+  $('analyse').disabled = true;
+  show('s-progress', true);
+  show('s-play', false);
+  setStatus('job-status', 'Queued…');
+  $('job-bar').style.width = '0%';
+  try {
+    const job = await api(`/videos/${state.video.id}/analyse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_index: state.selected }),
+    });
+    pollJob(job.id);
+  } catch (error) {
+    setStatus('job-status', error.message, true);
+    $('analyse').disabled = false;
+  }
+});
+
+function pollJob(jobId) {
+  clearInterval(state.pollTimer);
+  state.pollTimer = setInterval(async () => {
+    let job;
+    try {
+      job = await api(`/jobs/${jobId}`);
+    } catch (error) {
+      clearInterval(state.pollTimer);
+      setStatus('job-status', error.message, true);
+      return;
+    }
+    $('job-bar').style.width = `${Math.round(job.progress * 100)}%`;
+    setStatus('job-status', `${job.status} — ${Math.round(job.progress * 100)}%`);
+
+    if (job.status === 'done') {
+      clearInterval(state.pollTimer);
+      $('analyse').disabled = false;
+      await startPlayback();
+    } else if (job.status === 'failed') {
+      clearInterval(state.pollTimer);
+      $('analyse').disabled = false;
+      setStatus('job-status', `failed: ${job.error}`, true);
+    }
+  }, 1000);
+}
+
+// -------------------------------------------------------------- 4. playback
+
+async function startPlayback() {
+  state.keypoints = await api(`/videos/${state.video.id}/keypoints`);
+  show('s-play', true);
+  $('hud-total').textContent = state.keypoints.frame_count;
+  $('hud-tracked').textContent = state.keypoints.tracked_frame_count;
+  $('hud-gaps').textContent = state.keypoints.gap_frame_count;
+
+  const player = $('player');
+  player.src = `/videos/${state.video.id}/file`;
+  player.load();
+  requestAnimationFrame(draw);
+}
+
+function sizeCanvas() {
+  const canvas = $('overlay');
+  const player = $('player');
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.round(player.clientWidth * ratio);
+  const height = Math.round(player.clientHeight * ratio);
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+}
+
+function currentFrameIndex() {
+  const data = state.keypoints;
+  // Frame N covers [N/fps, (N+1)/fps), so floor - not round - is the frame
+  // actually on screen.
+  const index = Math.floor($('player').currentTime * data.fps);
+  return Math.max(0, Math.min(data.frame_count - 1, index));
+}
+
+function draw() {
+  requestAnimationFrame(draw);
+  const data = state.keypoints;
+  if (!data) return;
+
+  sizeCanvas();
+  const canvas = $('overlay');
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  const index = currentFrameIndex();
+  const landmarks = data.frames[index];
+  $('hud-frame').textContent = index;
+
+  if (!landmarks) {
+    // A gap is drawn as nothing. Never interpolated across: the tracker did
+    // not find this person here, and inventing a pose would hide exactly the
+    // failure this is meant to show.
+    $('hud-state').innerHTML = $('show-gaps').checked
+      ? '<span class="gap">gap — no match</span>' : '&mdash;';
+    $('hud-iou').textContent = '—';
+    return;
+  }
+
+  $('hud-state').textContent = 'tracked';
+  // Defensive: a missing confidence must not take the whole overlay down
+  // with it. Drawing the skeleton matters more than the readout beside it.
+  const iou = data.match_iou ? data.match_iou[index] : null;
+  $('hud-iou').textContent = (iou === null || iou === undefined) ? '—' : iou.toFixed(2);
+
+  const scale = window.devicePixelRatio || 1;
+  const toX = (x) => x * canvas.width;
+  const toY = (y) => y * canvas.height;
+
+  context.lineWidth = 2.5 * scale;
+  context.lineCap = 'round';
+  for (const [start, end] of data.landmark_connections) {
+    const a = landmarks[start];
+    const b = landmarks[end];
+    if (!a || !b) continue;
+    // Opacity carries the model's own confidence, so uncertainty is visible
+    // rather than hidden behind a threshold.
+    const confidence = Math.min(a[2], b[2]);
+    context.strokeStyle = `rgba(91,156,246,${Math.max(0.15, confidence)})`;
+    context.beginPath();
+    context.moveTo(toX(a[0]), toY(a[1]));
+    context.lineTo(toX(b[0]), toY(b[1]));
+    context.stroke();
+  }
+
+  for (const landmark of landmarks) {
+    context.fillStyle = `rgba(255,255,255,${Math.max(0.2, landmark[2])})`;
+    context.beginPath();
+    context.arc(toX(landmark[0]), toY(landmark[1]), 3 * scale, 0, Math.PI * 2);
+    context.fill();
+  }
 }
 </script>
 </body>

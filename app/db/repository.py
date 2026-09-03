@@ -10,8 +10,38 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, replace
 from datetime import datetime
+from enum import Enum
 
 from app.geometry import BoundingBox
+
+
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in (JobStatus.DONE, JobStatus.FAILED)
+
+
+@dataclass(frozen=True)
+class JobRecord:
+    """One analysis run over one video.
+
+    ``progress`` is 0-1 over the frames processed so far.
+    """
+
+    id: str
+    video_id: str
+    candidate_index: int
+    status: JobStatus
+    progress: float
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,3 +135,57 @@ class VideoRepository(abc.ABC):
     @abc.abstractmethod
     def delete(self, video_id: str) -> bool:
         """Remove the row. Returns False if it was not there."""
+
+
+class UnitOfWork(abc.ABC):
+    """Explicit control over when written rows become visible elsewhere.
+
+    Needed because the job queue runs on another thread: an id handed to the
+    worker before its row is committed refers, from that thread, to a job that
+    does not exist.
+    """
+
+    @abc.abstractmethod
+    def commit(self) -> None:
+        """Make everything written so far durable and visible."""
+
+
+class JobRepository(abc.ABC):
+    """Persistence for job state.
+
+    Job state is in the database rather than in the queue so that a status
+    request answers from durable storage - a page refresh, or a restart, sees
+    what actually happened.
+    """
+
+    @abc.abstractmethod
+    def add(self, job: JobRecord) -> JobRecord:
+        """Store a newly queued job."""
+
+    @abc.abstractmethod
+    def get(self, job_id: str) -> JobRecord | None:
+        """Return the job, or None if it does not exist."""
+
+    @abc.abstractmethod
+    def list_for_video(self, video_id: str, limit: int = 20) -> list[JobRecord]:
+        """Jobs for one video, newest first."""
+
+    @abc.abstractmethod
+    def mark_running(self, job_id: str) -> None:
+        """Move a job to running and stamp its start time."""
+
+    @abc.abstractmethod
+    def update_progress(self, job_id: str, progress: float) -> None:
+        """Record fractional progress, 0-1."""
+
+    @abc.abstractmethod
+    def mark_done(self, job_id: str) -> None:
+        """Move a job to done and stamp its finish time."""
+
+    @abc.abstractmethod
+    def mark_failed(self, job_id: str, error: str) -> None:
+        """Move a job to failed, recording why."""
+
+    @abc.abstractmethod
+    def list_unfinished(self) -> list[JobRecord]:
+        """Jobs left queued or running, for recovery after a restart."""

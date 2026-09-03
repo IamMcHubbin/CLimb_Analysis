@@ -98,6 +98,11 @@ class PoseEstimator(abc.ABC):
         """Names in landmark order. Defines the schema of the stored keypoints."""
 
     @property
+    @abc.abstractmethod
+    def landmark_connections(self) -> tuple[tuple[int, int], ...]:
+        """Skeleton edges as (start, end) index pairs, for drawing."""
+
+    @property
     def num_landmarks(self) -> int:
         return len(self.landmark_names)
 

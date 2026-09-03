@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -54,3 +54,23 @@ class VideoRow(Base):
     # The candidate set, as JSON. A whole-set read and a whole-set write every
     # time, never queried by field, so a column beats a second table here.
     candidates_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class JobRow(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(32), ForeignKey("videos.id", ondelete="CASCADE"))
+    candidate_index: Mapped[int] = mapped_column(Integer)
+
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    progress: Mapped[float] = mapped_column(Float, default=0.0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The status endpoint is polled per video while a job runs.
+    __table_args__ = (Index("ix_jobs_video_created", "video_id", "created_at"),)

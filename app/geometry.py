@@ -41,4 +41,8 @@ class BoundingBox:
             return 0.0
         intersection = (right - left) * (bottom - top)
         union = self.area + other.area - intersection
-        return intersection / union if union > 0 else 0.0
+        if union <= 0:
+            return 0.0
+        # Clamped: identical boxes can compute to fractionally over 1.0 in
+        # floating point, and a ratio above 1 would be nonsense downstream.
+        return min(1.0, intersection / union)
