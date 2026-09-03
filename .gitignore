@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+data/
+models/
+*.mp4
+*.parquet
+*.db
+.DS_Store
+
+# Sample footage committed deliberately, for the benchmark and for tuning
+# tracking thresholds against real climbing video.
+!fixtures/
+!fixtures/**
