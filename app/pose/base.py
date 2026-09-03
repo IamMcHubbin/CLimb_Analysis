@@ -12,6 +12,18 @@ import abc
 from dataclasses import dataclass
 from enum import Enum
 
+from app.geometry import BoundingBox
+
+
+__all__ = [
+    "BoundingBox",
+    "FramePose",
+    "Landmark",
+    "PersonPose",
+    "PoseEstimator",
+    "RunningMode",
+]
+
 
 class RunningMode(str, Enum):
     """Whether the estimator may carry state between calls.
@@ -23,40 +35,6 @@ class RunningMode(str, Enum):
 
     IMAGE = "image"
     VIDEO = "video"
-
-
-@dataclass(frozen=True)
-class BoundingBox:
-    """Normalised box. ``x``/``y`` are the top-left corner."""
-
-    x: float
-    y: float
-    width: float
-    height: float
-
-    @property
-    def x2(self) -> float:
-        return self.x + self.width
-
-    @property
-    def y2(self) -> float:
-        return self.y + self.height
-
-    @property
-    def area(self) -> float:
-        return max(0.0, self.width) * max(0.0, self.height)
-
-    def iou(self, other: "BoundingBox") -> float:
-        """Intersection over union. The basis of frame-to-frame tracking."""
-        left = max(self.x, other.x)
-        top = max(self.y, other.y)
-        right = min(self.x2, other.x2)
-        bottom = min(self.y2, other.y2)
-        if right <= left or bottom <= top:
-            return 0.0
-        intersection = (right - left) * (bottom - top)
-        union = self.area + other.area - intersection
-        return intersection / union if union > 0 else 0.0
 
 
 @dataclass(frozen=True)

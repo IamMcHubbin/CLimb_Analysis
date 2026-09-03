@@ -7,8 +7,8 @@ swapping MediaPipe for something else happens here.
 from __future__ import annotations
 
 from app.config import Settings, settings as default_settings
+from app.geometry import BoundingBox
 from app.pose.base import (
-    BoundingBox,
     FramePose,
     Landmark,
     PersonPose,

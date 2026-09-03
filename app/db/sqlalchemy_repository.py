@@ -2,13 +2,54 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import VideoRow
-from app.db.repository import VideoRecord, VideoRepository
+from app.db.repository import Candidate, CandidateSet, VideoRecord, VideoRepository
+from app.geometry import BoundingBox
+
+
+def _encode_candidates(candidates: CandidateSet) -> str:
+    return json.dumps(
+        {
+            "frame_index": candidates.frame_index,
+            "candidates": [
+                {
+                    "index": candidate.index,
+                    "x": candidate.bounding_box.x,
+                    "y": candidate.bounding_box.y,
+                    "width": candidate.bounding_box.width,
+                    "height": candidate.bounding_box.height,
+                    "mean_visibility": candidate.mean_visibility,
+                }
+                for candidate in candidates.candidates
+            ],
+        }
+    )
+
+
+def _decode_candidates(payload: str) -> CandidateSet:
+    data = json.loads(payload)
+    return CandidateSet(
+        frame_index=int(data["frame_index"]),
+        candidates=tuple(
+            Candidate(
+                index=int(entry["index"]),
+                bounding_box=BoundingBox(
+                    x=float(entry["x"]),
+                    y=float(entry["y"]),
+                    width=float(entry["width"]),
+                    height=float(entry["height"]),
+                ),
+                mean_visibility=float(entry["mean_visibility"]),
+            )
+            for entry in data["candidates"]
+        ),
+    )
 
 
 def _to_record(row: VideoRow) -> VideoRecord:
@@ -89,6 +130,19 @@ class SqlAlchemyVideoRepository(VideoRepository):
             raise KeyError(video_id)
         row.keypoints_path = path
         self._session.flush()
+
+    def save_candidates(self, video_id: str, candidates: CandidateSet) -> None:
+        row = self._session.get(VideoRow, video_id)
+        if row is None:
+            raise KeyError(video_id)
+        row.candidates_json = _encode_candidates(candidates)
+        self._session.flush()
+
+    def get_candidates(self, video_id: str) -> CandidateSet | None:
+        row = self._session.get(VideoRow, video_id)
+        if row is None or not row.candidates_json:
+            return None
+        return _decode_candidates(row.candidates_json)
 
     def delete(self, video_id: str) -> bool:
         row = self._session.get(VideoRow, video_id)

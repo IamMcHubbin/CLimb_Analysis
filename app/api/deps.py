@@ -15,7 +15,9 @@ from app.config import Settings, settings as app_settings
 from app.db.repository import VideoRepository
 from app.db.session import session_scope
 from app.db.sqlalchemy_repository import SqlAlchemyVideoRepository
+from app.candidates import CandidateService, EstimatorFactory
 from app.ingest.service import IngestService
+from app.pose import RunningMode, create_pose_estimator
 
 
 def get_settings() -> Settings:
@@ -36,3 +38,26 @@ def get_ingest_service(
     settings: Settings = Depends(get_settings),
 ) -> IngestService:
     return IngestService(repository, settings=settings)
+
+
+def get_estimator_factory(
+    settings: Settings = Depends(get_settings),
+) -> EstimatorFactory:
+    """Builds a single-frame pose estimator.
+
+    Its own dependency so a test can substitute a stub without also having to
+    rebuild the service and its session-scoped repository.
+    """
+
+    def factory():
+        return create_pose_estimator(mode=RunningMode.IMAGE, settings=settings)
+
+    return factory
+
+
+def get_candidate_service(
+    repository: VideoRepository = Depends(get_video_repository),
+    settings: Settings = Depends(get_settings),
+    estimator_factory: EstimatorFactory = Depends(get_estimator_factory),
+) -> CandidateService:
+    return CandidateService(repository, settings=settings, estimator_factory=estimator_factory)

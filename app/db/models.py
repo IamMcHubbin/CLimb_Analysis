@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy import DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -50,3 +50,7 @@ class VideoRow(Base):
 
     # Set once a pose analysis job finishes. Relative to the data directory.
     keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # The candidate set, as JSON. A whole-set read and a whole-set write every
+    # time, never queried by field, so a column beats a second table here.
+    candidates_json: Mapped[str | None] = mapped_column(Text, nullable=True)

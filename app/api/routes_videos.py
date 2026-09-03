@@ -1,7 +1,6 @@
-"""Video routes.
+"""Video routes: ingest, and picking which person in the frame is the climber.
 
-Only the ingest half of the API exists so far: upload, then read back what was
-stored. Candidate selection, analysis jobs and keypoints come later.
+Analysis jobs and keypoints come later.
 """
 
 from __future__ import annotations
@@ -13,10 +12,17 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
-from app.api.deps import get_ingest_service, get_settings, get_video_repository
-from app.api.schemas import VideoOut
+from app.api.deps import (
+    get_candidate_service,
+    get_ingest_service,
+    get_settings,
+    get_video_repository,
+)
+from app.api.schemas import CandidatesOut, VideoOut
+from app.candidates import CandidateService
 from app.config import Settings
-from app.db.repository import VideoRepository
+from app.db.repository import VideoRecord, VideoRepository
+from app.frames import FrameReadError
 from app.ingest.errors import IngestError, NormalisationFailed, UnreadableVideo
 from app.ingest.service import IngestService
 from app.ingest.upload import EmptyUpload, UploadTooLarge, save_stream
@@ -65,7 +71,7 @@ async def upload_video(
             ) from exc
     except UploadTooLarge as exc:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(exc),
         ) from exc
     except EmptyUpload as exc:
@@ -94,15 +100,19 @@ def list_videos(
     return [VideoOut.from_record(record) for record in repository.list(limit=limit, offset=offset)]
 
 
+def _require_video(repository: VideoRepository, video_id: str) -> VideoRecord:
+    record = repository.get(video_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown video")
+    return record
+
+
 @router.get("/{video_id}", response_model=VideoOut)
 def get_video(
     video_id: str,
     repository: VideoRepository = Depends(get_video_repository),
 ) -> VideoOut:
-    record = repository.get(video_id)
-    if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown video")
-    return VideoOut.from_record(record)
+    return VideoOut.from_record(_require_video(repository, video_id))
 
 
 @router.get("/{video_id}/file")
@@ -115,10 +125,55 @@ def get_video_file(
 
     Returned via FileResponse so range requests work and the browser can seek.
     """
-    record = repository.get(video_id)
-    if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown video")
+    record = _require_video(repository, video_id)
     path = settings.resolve(record.stored_path)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="video file is missing")
     return FileResponse(path, media_type="video/mp4", filename=f"{video_id}.mp4")
+
+
+@router.get("/{video_id}/candidates", response_model=CandidatesOut)
+def get_candidates(
+    video_id: str,
+    frame_index: int | None = Query(
+        None, ge=0, description="Frame to detect in. Defaults to the middle of the clip."
+    ),
+    refresh: bool = Query(False, description="Re-run detection even if a set is stored."),
+    repository: VideoRepository = Depends(get_video_repository),
+    service: CandidateService = Depends(get_candidate_service),
+) -> CandidatesOut:
+    """Detect everyone in one frame, so the client can ask which is the climber.
+
+    The result is stored: the index returned here is what starts an analysis,
+    and re-running detection would renumber the candidates underneath the user.
+    Pass a different `frame_index` if the climber is not in shot mid-clip.
+    """
+    record = _require_video(repository, video_id)
+    try:
+        if refresh:
+            candidate_set = service.detect(record, frame_index)
+        else:
+            candidate_set = service.get_or_detect(record, frame_index)
+    except FrameReadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"could not read that frame: {exc}",
+        ) from exc
+    return CandidatesOut.from_set(record, candidate_set)
+
+
+@router.get("/{video_id}/candidates/frame.jpg")
+def get_candidate_frame(
+    video_id: str,
+    repository: VideoRepository = Depends(get_video_repository),
+    service: CandidateService = Depends(get_candidate_service),
+) -> FileResponse:
+    """The frame the candidates were detected in, for the client to draw on."""
+    record = _require_video(repository, video_id)
+    path = service.frame_path(record)
+    if not path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no candidate frame yet; call /candidates first",
+        )
+    return FileResponse(path, media_type="image/jpeg")
