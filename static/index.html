@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Climb Analysis</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --line: #2c313b;
+    --text: #e6e8ec;
+    --muted: #939aa8;
+    --accent: #5b9cf6;
+    --warn: #e0a33e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px; margin-bottom: 18px;
+  }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--muted); margin: 0 0 14px; font-weight: 600; }
+  input[type=file] { color: var(--muted); max-width: 100%; }
+  button {
+    background: var(--accent); color: #0d1017; border: 0; border-radius: 6px;
+    padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .status { margin-top: 12px; font-size: 14px; color: var(--muted); min-height: 20px; }
+  .status.error { color: #f2867d; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 45%; }
+  video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  .flag { color: var(--warn); }
+  .hidden { display: none; }
+  .todo { color: var(--muted); font-size: 14px; margin: 0; }
+  code { background: #0f1116; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Climb Analysis</h1>
+  <p class="sub">Pose analysis for climbing video &mdash; ingest only so far.</p>
+
+  <section>
+    <h2>Upload</h2>
+    <div class="row">
+      <input type="file" id="file" accept="video/*">
+      <button id="upload" disabled>Upload &amp; normalise</button>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <section id="result" class="hidden">
+    <h2>Normalised video</h2>
+    <video id="player" controls playsinline></video>
+    <table id="meta"></table>
+  </section>
+
+  <section>
+    <h2>Not built yet</h2>
+    <p class="todo">
+      Candidate picker, analysis job progress and the skeleton overlay come next.
+      The <code>&lt;canvas&gt;</code> overlay will sit on top of the player above.
+    </p>
+  </section>
+</main>
+
+<script>
+const fileInput = document.getElementById('file');
+const uploadButton = document.getElementById('upload');
+const statusLine = document.getElementById('status');
+const resultPanel = document.getElementById('result');
+const player = document.getElementById('player');
+const metaTable = document.getElementById('meta');
+
+fileInput.addEventListener('change', () => {
+  uploadButton.disabled = fileInput.files.length === 0;
+  setStatus('');
+});
+
+uploadButton.addEventListener('click', upload);
+
+function setStatus(text, isError = false) {
+  statusLine.textContent = text;
+  statusLine.classList.toggle('error', isError);
+}
+
+function formatBytes(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} kB`;
+}
+
+async function upload() {
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  uploadButton.disabled = true;
+  resultPanel.classList.add('hidden');
+  // Normalisation is a transcode, so this is not instant on a long clip.
+  setStatus(`Uploading and normalising ${file.name} — this transcodes the whole clip…`);
+
+  const body = new FormData();
+  body.append('file', file);
+
+  try {
+    const response = await fetch('/videos', { method: 'POST', body });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || `upload failed (${response.status})`);
+    }
+    setStatus(`Done. Video id ${payload.id}`);
+    render(payload);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    uploadButton.disabled = false;
+  }
+}
+
+function render(video) {
+  player.src = `/videos/${video.id}/file`;
+
+  const source = video.source;
+  const rotationNote = source.rotation
+    ? `<span class="flag">${source.rotation}° — baked into the pixels</span>`
+    : 'none';
+  const vfrNote = source.variable_frame_rate
+    ? '<span class="flag">variable — retimed to constant</span>'
+    : 'constant';
+
+  const rows = [
+    ['Stored as', `${video.width}×${video.height}, ${video.fps} fps`],
+    ['Frames', `${video.frame_count} (${video.duration_seconds.toFixed(2)}s)`],
+    ['Size', formatBytes(video.size_bytes)],
+    ['Source dimensions', `${source.width}×${source.height} ${source.codec}`],
+    ['Source rotation flag', rotationNote],
+    ['Source frame timing', vfrNote],
+  ];
+
+  metaTable.innerHTML = rows
+    .map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`)
+    .join('');
+  resultPanel.classList.remove('hidden');
+}
+</script>
+</body>
+</html>

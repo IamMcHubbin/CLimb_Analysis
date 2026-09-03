@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Videos, keypoints and the SQLite database survive a rebuild.
+      - ./data:/data
+    environment:
+      # lite | full | heavy - see the benchmark table in the README
+      CLIMB_POSE_MODEL: lite
+      CLIMB_MAX_PEOPLE: "5"

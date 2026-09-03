@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+data/
+models/
+*.mp4
+*.parquet
+*.db
+.DS_Store

@@ -1,0 +1,52 @@
+"""SQLAlchemy ORM models.
+
+These types are an implementation detail of the SQLAlchemy repository. Nothing
+outside ``app.db`` should import them - routes and workers deal in the domain
+records defined in ``app.db.repository``.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class VideoRow(Base):
+    __tablename__ = "videos"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    original_filename: Mapped[str] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    # The normalised video: constant fps, rotation baked in, long edge capped.
+    # Path is relative to the data directory. The original is never kept.
+    stored_path: Mapped[str] = mapped_column(String(512))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    fps: Mapped[float] = mapped_column(Float)
+    frame_count: Mapped[int] = mapped_column(Integer)
+    duration_seconds: Mapped[float] = mapped_column(Float)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+
+    # What the upload looked like before normalisation. Kept for debugging
+    # ingest problems - orientation and frame timing bugs are invisible
+    # afterwards, so the evidence has to be recorded here.
+    source_width: Mapped[int] = mapped_column(Integer)
+    source_height: Mapped[int] = mapped_column(Integer)
+    source_fps: Mapped[float] = mapped_column(Float)
+    source_rotation: Mapped[int] = mapped_column(Integer)
+    source_codec: Mapped[str] = mapped_column(String(64))
+    source_variable_frame_rate: Mapped[bool] = mapped_column(Integer)
+
+    # Set once a pose analysis job finishes. Relative to the data directory.
+    keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
