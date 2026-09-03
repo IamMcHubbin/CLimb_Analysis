@@ -149,32 +149,42 @@ the first thing worth looking at when the overlay is misaligned.
 ```
 app/
   config.py            settings from the environment
-  main.py              FastAPI app
+  main.py              FastAPI app and lifespan
+  geometry.py          bounding boxes and IoU
+  frames.py            frame reading, shared by the picker and the worker
+  candidates.py        detection on one frame, for the picker
+  tracking.py          following one person; gaps
+  keypoints.py         keypoint storage interface + parquet implementation
+  analysis.py          the analysis job itself
   api/                 routes, response schemas, dependency wiring
-  db/                  repository interface + SQLAlchemy implementation
+  db/                  repository interfaces + SQLAlchemy implementation
   ingest/              ffprobe, ffmpeg normalisation, upload streaming
+  jobs/                queue interface, worker thread, submission
   pose/                pose estimator interface + MediaPipe implementation
 scripts/
   benchmark_pose.py    times pose estimation over a clip
   make_sample_clip.py  builds a phone-like test clip from a photo
   download_models.py   fetches model files
-static/index.html      upload page (placeholder for the real UI)
+static/index.html      the whole UI
 ```
 
-Three boundaries are deliberate, because what sits behind them is expected to
+Five boundaries are deliberate, because what sits behind them is expected to
 change:
 
 - **`app.pose.base.PoseEstimator`** — the pose model will be swapped.
   `create_pose_estimator()` is the only place naming MediaPipe. Coordinates are
   normalised 0-1, never pixels.
-- **`app.db.repository.VideoRepository`** — routes and workers deal in
-  `VideoRecord`, never ORM objects, so the backing store can change without
-  touching them.
-- **`app.ingest`** — everything about ffmpeg lives here.
+- **`app.tracking.Tracker`** — IoU is the simplest thing that could work.
+- **`app.keypoints.KeypointStore`** — parquet today; long-format, so a model
+  with a different number of joints still fits.
+- **`app.jobs.base.JobQueue`** — one thread today, a broker later. It carries
+  job ids and nothing else, which is what keeps that swap cheap.
+- **`app.db.repository`** — routes and workers deal in `VideoRecord`,
+  `JobRecord` and `CandidateSet`, never ORM objects.
+
+`app.ingest` holds everything that knows about ffmpeg.
 
 ## API
-
-Implemented:
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -182,20 +192,38 @@ Implemented:
 | `GET /videos` | List uploaded videos |
 | `GET /videos/{id}` | Metadata for one video |
 | `GET /videos/{id}/file` | Serve the normalised file (range requests, so it seeks) |
+| `GET /videos/{id}/candidates` | People detected in one frame, plus a JPEG of it |
+| `GET /videos/{id}/candidates/frame.jpg` | That frame, to draw the boxes on |
+| `POST /videos/{id}/analyse` | Queue analysis of a chosen candidate |
+| `GET /jobs/{id}` | Job status and percent complete |
+| `GET /videos/{id}/keypoints` | The finished track |
 | `GET /healthz` | Liveness |
 
 Upload normalisation is synchronous, so a long clip holds the request open. It
 is deliberate: nothing can be done with a video until it is normalised, and
 deferring it would mean a video row that exists but is not yet usable.
+Candidate detection costs a second or two, and is cached after the first call.
+Analysis is queued and polled.
 
-Planned:
+`/keypoints` returns `frames` index-aligned with the video — entry N is frame
+N, `null` is a gap — plus `match_iou` per frame, the tracker's confidence in
+that frame's match. Coordinates are normalised 0-1, and can fall slightly
+outside that range where the model extrapolates an occluded joint.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /videos/{id}/candidates` | Detected people in a mid-clip frame, plus a JPEG of it |
-| `POST /videos/{id}/analyse` | Enqueue analysis for a chosen candidate |
-| `GET /jobs/{id}` | Job status and percent complete |
-| `GET /videos/{id}/keypoints` | Finished keypoint data |
+## Jobs
+
+One background thread, pulling ids off an in-process queue, running jobs one at
+a time. Job state lives in SQLite, not in the queue, so a page refresh sees the
+truth. `JobQueue` is three methods; swapping in a broker means writing another
+implementation of it and changing what `build_queue` returns.
+
+Jobs run one at a time because pose estimation already saturates the CPU — a
+second worker would make both slower rather than finishing anything sooner.
+
+On startup, jobs left `running` by a previous process are marked failed (the
+process that owned them is gone, and leaving the row at `running` means a
+status that never changes again) and jobs left `queued` are put back on the
+queue.
 
 ## Configuration
 
@@ -211,20 +239,50 @@ Planned:
 | `CLIMB_MAX_PEOPLE` | `5` | Maximum people detected per frame |
 | `CLIMB_FFMPEG` / `CLIMB_FFPROBE` | `ffmpeg` / `ffprobe` | Binary paths |
 
-## Next
+## What it does on real footage
 
-1. `GET /videos/{id}/candidates` — pose detection on one mid-clip frame,
-   returning normalised bounding boxes and a JPEG to draw them on.
-2. Job queue: a single background thread behind a small interface, job state in
-   SQLite so status survives a refresh, percent complete updated as frames are
-   processed.
-3. IoU tracking of the chosen candidate, with unmatched frames recorded as gaps
-   rather than snapped to whoever else is nearby.
-4. Keypoint storage, one parquet file per video, path in the database row.
-5. The overlay: `<canvas>` over `<video>`, frame index from `currentTime` on
-   each `requestAnimationFrame`, gaps drawn as nothing.
+Measured on a 31-second clip from a bouldering gym: 1080x1920 portrait,
+variable frame rate, climber 10-26% of frame height, and somebody walking
+through the foreground mid-climb.
 
-No smoothing filter — the point is to see the raw jitter first.
+| Phase | Frames | Tracked |
+|-------|--------|---------|
+| approach, not yet on the wall | 0-65 | 47% |
+| climbing | 66-405 | 92% |
+| person walks through the shot | 406-472 | 31% |
+| climbing | 473-749 | 100% |
+| coming off the wall | 750-822 | 44% |
+| climber has left frame | 823-929 | 0% |
+| **the climb itself** | **66-749** | **89%** |
+
+Median match IoU 0.84. **Zero frames tracked the wrong person** — the walker
+who fills two thirds of the frame was never picked up, and the track resumed
+on the climber afterwards. That was the rule worth testing, and it held.
+
+The gaps are honest ones: the climber genuinely is occluded, out of shot, or
+moving too fast to detect. Nothing was invented to fill them.
+
+Model choice barely matters here — lite, full and heavy each found the climber
+in 12-13 of 16 sampled frames — so there is no reason to pay for a bigger one.
+
+## What this still needs
+
+**Thresholds are still guesses.** `TrackingConfig.min_iou` is 0.3 and gaps
+never expire, so the tracker keeps trying to re-acquire indefinitely. One clip
+is not enough to tune that. Footage with two climbers on the same wall is the
+next useful input, since that is the case where re-acquiring the wrong person
+is actually possible.
+
+**No smoothing filter**, deliberately — the raw jitter is the thing to see
+first.
+
+Known rough edges:
+
+- The schema has no migrations. Changing a model means deleting
+  `data/climb.db`; the data is disposable at this stage.
+- Analysis buffers the detections before the seed frame in memory, which is
+  what limits practical clip length. Fine for a few minutes.
+- Uploads and analysis are unauthenticated and unbounded per user.
 
 ## Notes
 
