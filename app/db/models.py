@@ -62,6 +62,9 @@ class JobRow(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     video_id: Mapped[str] = mapped_column(String(32), ForeignKey("videos.id", ondelete="CASCADE"))
     candidate_index: Mapped[int] = mapped_column(Integer)
+    analysis_run_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("analysis_runs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     status: Mapped[str] = mapped_column(String(16), index=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
@@ -74,3 +77,21 @@ class JobRow(Base):
 
     # The status endpoint is polled per video while a job runs.
     __table_args__ = (Index("ix_jobs_video_created", "video_id", "created_at"),)
+
+
+class AnalysisRunRow(Base):
+    __tablename__ = "analysis_runs"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(32), ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    candidate_frame_index: Mapped[int] = mapped_column(Integer)
+    selected_candidate_index: Mapped[int] = mapped_column(Integer)
+    seed_x: Mapped[float] = mapped_column(Float)
+    seed_y: Mapped[float] = mapped_column(Float)
+    seed_width: Mapped[float] = mapped_column(Float)
+    seed_height: Mapped[float] = mapped_column(Float)
+    min_iou: Mapped[float] = mapped_column(Float)
+    max_gap_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pose_model: Mapped[str] = mapped_column(String(32))
+    max_people: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)

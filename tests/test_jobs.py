@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.db import SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
+from app.db import SqlAlchemyAnalysisRunRepository, SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
 from app.db.repository import JobRecord, JobStatus
 from app.jobs.base import JobQueue
 from app.jobs.inprocess import ThreadedJobQueue
@@ -125,6 +125,8 @@ def test_submitting_queues_a_persisted_job(settings, video_with_candidates):
             SqlAlchemyVideoRepository(session),
             queue,
             _CommitTracker(session, queue),
+            SqlAlchemyAnalysisRunRepository(session),
+            settings=settings,
         )
         job = service.submit(video_with_candidates.id, 0)
 
@@ -159,6 +161,8 @@ def test_the_job_is_committed_before_it_is_enqueued(settings, video_with_candida
             SqlAlchemyVideoRepository(session),
             queue,
             tracker,
+            SqlAlchemyAnalysisRunRepository(session),
+            settings=settings,
         )
         service.submit(video_with_candidates.id, 0)
 
@@ -175,6 +179,8 @@ def test_submitting_an_unknown_candidate_is_rejected(settings, video_with_candid
             SqlAlchemyVideoRepository(session),
             queue,
             _CommitTracker(session, queue),
+            SqlAlchemyAnalysisRunRepository(session),
+            settings=settings,
         )
         with pytest.raises(UnknownCandidate):
             service.submit(video_with_candidates.id, 7)
@@ -191,7 +197,8 @@ def test_submitting_before_candidates_exist_is_rejected(settings, make_video):
         videos = SqlAlchemyVideoRepository(session)
         video = IngestService(videos, settings=settings).ingest(source, "clip.mp4")
         service = JobService(
-            SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue)
+            SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue),
+            SqlAlchemyAnalysisRunRepository(session), settings=settings,
         )
         with pytest.raises(UnknownCandidate):
             service.submit(video.id, 0)

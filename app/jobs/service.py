@@ -14,12 +14,16 @@ import uuid
 from datetime import datetime, timezone
 
 from app.db.repository import (
+    AnalysisRun,
+    AnalysisRunRepository,
     JobRecord,
     JobRepository,
     JobStatus,
     UnitOfWork,
     VideoRepository,
 )
+from app.tracking import TrackingConfig
+from app.config import Settings, settings as default_settings
 from app.jobs.base import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -36,11 +40,17 @@ class JobService:
         videos: VideoRepository,
         queue: JobQueue,
         unit_of_work: UnitOfWork,
+        analysis_runs: AnalysisRunRepository,
+        settings: Settings = default_settings,
+        tracking_config: TrackingConfig | None = None,
     ) -> None:
         self._jobs = jobs
         self._videos = videos
         self._queue = queue
         self._unit_of_work = unit_of_work
+        self._analysis_runs = analysis_runs
+        self._settings = settings
+        self._tracking_config = tracking_config or TrackingConfig()
 
     def submit(self, video_id: str, candidate_index: int) -> JobRecord:
         """Queue an analysis of one candidate. Returns immediately."""
@@ -53,6 +63,22 @@ class JobService:
                 f"no candidate {candidate_index}; available: {available}"
             )
 
+        candidate = candidates.get(candidate_index)
+        assert candidate is not None
+        run = self._analysis_runs.add(
+            AnalysisRun(
+                id=uuid.uuid4().hex,
+                video_id=video_id,
+                candidate_frame_index=candidates.frame_index,
+                selected_candidate_index=candidate_index,
+                seed_box=candidate.bounding_box,
+                min_iou=self._tracking_config.min_iou,
+                max_gap_frames=self._tracking_config.max_gap_frames,
+                pose_model=self._settings.pose_model,
+                max_people=self._settings.max_people,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         job = self._jobs.add(
             JobRecord(
                 id=uuid.uuid4().hex,
@@ -61,6 +87,7 @@ class JobService:
                 status=JobStatus.QUEUED,
                 progress=0.0,
                 created_at=datetime.now(timezone.utc),
+                analysis_run_id=run.id,
             )
         )
         # Committed before publishing: the worker thread cannot see a row that

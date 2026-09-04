@@ -42,6 +42,23 @@ class JobRecord:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
+    analysis_run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AnalysisRun:
+    """Immutable snapshot of one requested analysis."""
+    id: str
+    video_id: str
+    candidate_frame_index: int
+    selected_candidate_index: int
+    seed_box: BoundingBox
+    min_iou: float
+    max_gap_frames: int | None
+    pose_model: str
+    max_people: int
+    created_at: datetime
+    keypoints_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -189,3 +206,17 @@ class JobRepository(abc.ABC):
     @abc.abstractmethod
     def list_unfinished(self) -> list[JobRecord]:
         """Jobs left queued or running, for recovery after a restart."""
+
+
+class AnalysisRunRepository(abc.ABC):
+    @abc.abstractmethod
+    def add(self, run: AnalysisRun) -> AnalysisRun: ...
+
+    @abc.abstractmethod
+    def get(self, run_id: str) -> AnalysisRun | None: ...
+
+    @abc.abstractmethod
+    def list_for_video(self, video_id: str, limit: int = 20) -> list[AnalysisRun]: ...
+
+    @abc.abstractmethod
+    def set_keypoints_path(self, run_id: str, path: str) -> None: ...

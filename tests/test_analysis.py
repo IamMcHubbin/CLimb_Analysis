@@ -8,7 +8,7 @@ import pytest
 
 from app.analysis import AnalysisJobHandler
 from app.candidates import CandidateService
-from app.db import SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
+from app.db import SqlAlchemyAnalysisRunRepository, SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
 from app.db.repository import JobStatus
 from app.ingest.service import IngestService
 from app.jobs.service import JobService
@@ -69,7 +69,8 @@ def prepared(settings, make_video):
 
         CandidateService(videos, settings, estimator_factory=factory).detect(video)
         service = JobService(
-            SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue)
+            SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue),
+            SqlAlchemyAnalysisRunRepository(session), settings=settings,
         )
         job = service.submit(video.id, 0)
     return video, job

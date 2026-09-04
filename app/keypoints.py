@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import abc
 import json
+import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,7 @@ class KeypointMetadata:
     landmark_connections: tuple[tuple[int, int], ...]
     pose_model: str
     min_iou: float
+    analysis_run_id: str | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -65,6 +67,7 @@ class KeypointMetadata:
                 "landmark_connections": [list(pair) for pair in self.landmark_connections],
                 "pose_model": self.pose_model,
                 "min_iou": self.min_iou,
+                "analysis_run_id": self.analysis_run_id,
             }
         )
 
@@ -79,6 +82,7 @@ class KeypointMetadata:
             landmark_connections=tuple((int(a), int(b)) for a, b in data["landmark_connections"]),
             pose_model=data["pose_model"],
             min_iou=float(data["min_iou"]),
+            analysis_run_id=data.get("analysis_run_id"),
         )
 
 
@@ -130,19 +134,21 @@ class ParquetKeypointStore(KeypointStore):
         return self._settings.keypoints_dir / f"{video_id}.parquet"
 
     def write(self, metadata: KeypointMetadata, tracked_frames: Iterable[TrackedFrame]) -> str:
-        destination = self.path_for(metadata.video_id)
+        destination = self._settings.keypoints_dir / f"{metadata.analysis_run_id or metadata.video_id}.parquet"
+        temporary = destination.with_name(f".{destination.stem}.{uuid.uuid4().hex}.tmp")
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         schema = _SCHEMA.with_metadata({METADATA_KEY: metadata.to_json().encode()})
-        writer = pq.ParquetWriter(destination, schema, compression="snappy")
+        writer = pq.ParquetWriter(temporary, schema, compression="snappy")
         try:
             for batch in _batched_record_batches(tracked_frames, schema, self._batch_frames):
                 writer.write_batch(batch)
         except BaseException:
             writer.close()
-            destination.unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
             raise
         writer.close()
+        temporary.replace(destination)
         return self._settings.relative(destination)
 
     def read(self, relative_path: str) -> KeypointData:
