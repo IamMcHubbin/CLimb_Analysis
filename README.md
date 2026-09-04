@@ -11,7 +11,8 @@ footage — not to produce metrics or coaching feedback.
 frame, watch the job run, then scrub the video with the skeleton drawn on top
 and a coverage chart showing exactly where tracking held and where it did not.
 Footage is deleted once it is no longer needed; the keypoints outlive it. No
-smoothing, no metrics, no hold detection.
+metrics, no hold detection; smoothing is a display toggle, and the stored
+keypoints stay raw.
 
 ---
 
@@ -21,7 +22,7 @@ Local, without Docker (needs `ffmpeg` and `ffprobe` on `PATH`):
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python scripts/download_models.py lite full
+.venv/bin/python scripts/download_models.py lite heavy
 .venv/bin/uvicorn app.main:app --reload
 ```
 
@@ -66,11 +67,15 @@ normalisation of a 10-second 1080x1920 phone clip took 5.4 s, which includes
 the extra decode pass that counts frames exactly.
 
 What this means for the build: with `lite` or `full`, a single background
-worker analyses a clip faster than real time, so a two-minute climb finishes in
-about a minute and a half. `heavy` does not keep up and would need the long
-edge dropped below 1280 to be practical. Multi-person detection roughly doubles
-the per-frame cost even when only one person is in frame, because the detector
-runs more often.
+worker analyses a clip faster than real time. Multi-person detection roughly
+doubles the per-frame cost even when only one person is in frame, because the
+detector runs more often, and landmark refinement adds a second pass - so
+budget about four times the single-pass figures above.
+
+`heavy` is slower than real time here and is still the right choice on a
+machine with CPU to spare: see the jitter section below for why. A 31-second
+clip took 156 seconds end to end on this 4-core VM, against 75 with `lite`.
+A desktop chip will be several times quicker than either.
 
 Caveats worth knowing before trusting these numbers:
 
@@ -114,9 +119,10 @@ also what seeds tracking.
 the middle of the clip, but the track has to cover all of it, and where that
 person stood at frame 0 is unknown. So the clip is decoded once, forwards:
 frames from the seed onward are tracked as they are decoded, and detections
-before the seed are buffered and tracked backwards afterwards. Every frame gets
-exactly one pose inference. The buffer holds the first part of the clip, which
-is what bounds how long a video this handles comfortably.
+before the seed are buffered and tracked backwards afterwards. One inference
+per frame in this pass; the refinement pass below adds a second. The buffer
+holds the first part of the clip, which is what bounds how long a video this
+handles comfortably.
 
 **An unmatched frame is a gap, and stays one.** Nothing is interpolated across
 it and the tracker never falls back to the nearest box. On a wall the wrong
@@ -146,7 +152,7 @@ original is deleted. Three guarantees hold for every stored file:
 |-----------|-----|
 | Constant 30 fps | Phone video is variable frame rate. Without this, `frame_index = round(time * fps)` is wrong, and the overlay drifts out of sync with the video. |
 | Rotation baked into the pixels | OpenCV ignores the rotation flag in the container, the browser does not. Without this the analysed frames and the played-back frames disagree about which way is up. |
-| Long edge capped at 1280 | Bounds inference cost. |
+| Long edge capped at 1280 | Bounds inference cost. Raising it does not improve landmark quality - the crop the model gets is the constraint, not the frame. |
 
 `normalise_video` verifies its own output — orientation, dimensions and frame
 rate — and raises rather than storing a file that violates the contract.
@@ -306,6 +312,45 @@ moving too fast to detect. Nothing was invented to fill them.
 
 Model choice barely matters here — lite, full and heavy each found the climber
 in 12-13 of 16 sampled frames — so there is no reason to pay for a bigger one.
+
+## Jitter, and what actually fixes it
+
+The first build's skeleton visibly wobbled. The cause was not model noise,
+which is what reaching for a smoothing filter would have assumed: on this
+footage the climber is a **median of 150 pixels tall**, and MediaPipe's
+landmark model works on a 256x256 crop of its subject, so it was upscaling
+from far less detail than it wants. The signature says the same - jitter was
+worst on feet, ankles and hands, lowest on ears and eyes.
+
+Measured on the gym clip, as median frame-to-frame landmark acceleration
+expressed as a fraction of body height:
+
+| | median | p90 | p99 |
+|---|---|---|---|
+| lite, single pass | 0.0762 | 0.542 | 1.686 |
+| lite + crop refinement | 0.0381 | 0.522 | 2.155 |
+| **heavy + crop refinement** | **0.0172** | **0.168** | **1.317** |
+| heavy + refinement + display smoothing | 0.0026 | 0.022 | 0.190 |
+
+Three findings worth keeping:
+
+**Raising the resolution cap does nothing.** 1280 to 1920 moved it from 0.0514
+to 0.0504 on a test segment. The frame is not the constraint; the crop the
+model gets is.
+
+**Cropping to the tracked person halves it, and is free.** The model is
+slightly faster on a smaller image, so the second pass costs about what the
+first did. See `app/pose/refine.py`.
+
+**heavy is worth its two-fold cost on this material.** Its raw output is
+steadier than lite's, it fixes the p99 that refinement alone made worse, and
+the two passes disagree on 30 frames rather than 81. `docker-compose.yml`
+defaults to it; the code default stays `lite` for constrained hosts.
+
+Smoothing is a One Euro filter applied **at display time only**, with a toggle.
+The stored keypoints stay raw, so the filtered and unfiltered tracks can still
+be compared - which was the whole reason for not shipping a filter until the
+raw behaviour had been seen.
 
 ## What this still needs
 

@@ -25,8 +25,10 @@ COPY scripts ./scripts
 COPY static ./static
 
 # Bake the models into the image so a cold container serves the first request
-# without reaching the network.
-RUN python scripts/download_models.py lite full
+# without reaching the network, and so CLIMB_POSE_MODEL can be changed without
+# one. heavy is ~30MB and worth carrying: on small subjects it more than halves
+# landmark jitter against lite.
+RUN python scripts/download_models.py lite full heavy
 
 VOLUME ["/data"]
 EXPOSE 8000
