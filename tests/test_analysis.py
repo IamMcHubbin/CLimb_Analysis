@@ -103,8 +103,48 @@ def test_a_successful_run_stores_keypoints_and_marks_the_job_done(settings, prep
     assert data.metadata.landmark_connections == CONNECTIONS
     assert data.tracked_frame_count == video.frame_count
     assert data.gap_frame_count == 0
-    # Exactly one inference per frame, whichever direction it was tracked in.
+    # Two passes over the clip: one to find and track, one to refine the
+    # landmarks on a crop. One inference per frame in each.
+    assert estimator.calls == video.frame_count * 2
+
+
+def test_refinement_can_be_turned_off(settings, prepared):
+    """Without it, one pass and one inference per frame."""
+    import dataclasses
+
+    video, job = prepared
+    settings = dataclasses.replace(settings, refine_landmarks=False)
+    handler, estimator = _handler(settings, [[_four_point_person(0.4, 0.4)]] * video.frame_count)
+
+    handler(job.id)
+
     assert estimator.calls == video.frame_count
+    with session_scope() as session:
+        assert SqlAlchemyJobRepository(session).get(job.id).status is JobStatus.DONE
+
+
+def test_a_failed_refinement_keeps_the_first_pass_track(settings, prepared):
+    """An improvement that fails should not lose the answer it was improving."""
+    from contextlib import contextmanager
+
+    video, job = prepared
+    calls = {"n": 0}
+
+    @contextmanager
+    def factory():
+        calls["n"] += 1
+        if calls["n"] > 1:                       # the refinement pass
+            raise RuntimeError("crop model fell over")
+        yield ScriptedEstimator([[_four_point_person(0.4, 0.4)]] * video.frame_count)
+
+    AnalysisJobHandler(settings, estimator_factory=factory)(job.id)
+
+    with session_scope() as session:
+        assert SqlAlchemyJobRepository(session).get(job.id).status is JobStatus.DONE
+        stored = SqlAlchemyVideoRepository(session).get(video.id)
+    assert stored.keypoints_path is not None
+    data = ParquetKeypointStore(settings).read(stored.keypoints_path)
+    assert data.tracked_frame_count == video.frame_count
 
 
 def test_frames_before_the_seed_frame_are_tracked_too(settings, prepared):

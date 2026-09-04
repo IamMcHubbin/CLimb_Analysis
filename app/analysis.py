@@ -24,6 +24,7 @@ from app.db.sqlalchemy_repository import SqlAlchemyJobRepository, SqlAlchemyVide
 from app.frames import FrameReader, timestamp_ms_for_frame
 from app.keypoints import KeypointMetadata, KeypointStore, ParquetKeypointStore
 from app.pose import PoseEstimator, RunningMode, create_pose_estimator
+from app.pose.refine import refine_landmarks
 from app.retention import FootageRetention
 from app.pose.base import PersonPose
 from app.tracking import IouTracker, TrackedFrame, TrackingConfig
@@ -106,6 +107,8 @@ class AnalysisJobHandler:
             jobs.mark_running(job_id)
 
         result = self._track(job_id, video, candidates, candidate.bounding_box)
+        if self._settings.refine_landmarks:
+            result = self._refine(job_id, video, result)
 
         metadata = KeypointMetadata(
             video_id=video.id,
@@ -172,7 +175,10 @@ class AnalysisJobHandler:
                     results[frame_index] = forward.update(frame_index, people)
 
                 if frame_index % update_every == 0:
-                    self._report_progress(job_id, frame_index / max(1, video.frame_count))
+                    share = 0.5 if self._settings.refine_landmarks else 1.0
+                    self._report_progress(
+                        job_id, share * frame_index / max(1, video.frame_count)
+                    )
 
         # Backward from the seed, so the start of the clip is covered too.
         backward = IouTracker(seed_box, self._tracking_config)
@@ -187,6 +193,33 @@ class AnalysisJobHandler:
             ],
             landmark_names=landmark_names,
             landmark_connections=landmark_connections,
+        )
+
+    def _refine(self, job_id: str, video: VideoRecord, result: TrackResult) -> TrackResult:
+        """Second pass: better landmarks from a crop around the tracked person.
+
+        A failure here is not fatal - the coarse track is still a usable
+        answer, and losing the whole job over an improvement would be a poor
+        trade.
+        """
+        video_path = self._settings.resolve(video.stored_path)
+        try:
+            with self._estimator_factory() as estimator, FrameReader(video_path) as reader:
+                frames = refine_landmarks(
+                    result.frames,
+                    reader,
+                    estimator,
+                    margin=self._settings.refine_margin,
+                    # The first pass covered 0-50% of the bar; this covers the rest.
+                    on_progress=lambda f: self._report_progress(job_id, 0.5 + f * 0.5),
+                )
+        except Exception:
+            logger.exception("landmark refinement failed; keeping the first-pass track")
+            return result
+        return TrackResult(
+            frames=frames,
+            landmark_names=result.landmark_names,
+            landmark_connections=result.landmark_connections,
         )
 
     def _report_progress(self, job_id: str, fraction: float) -> None:

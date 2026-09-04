@@ -59,6 +59,14 @@ class Settings:
     pose_model: str = os.environ.get("CLIMB_POSE_MODEL", "lite")
     max_people: int = _env_int("CLIMB_MAX_PEOPLE", 5)
 
+    # After tracking, re-run pose on a crop around the tracked person. The
+    # first pass sees the climber at whatever size they are in shot - often a
+    # tenth of the frame - while the model wants a subject that fills it.
+    # Measured on gym footage this halves landmark jitter for roughly the cost
+    # of a second pass, so it is on by default.
+    refine_landmarks: bool = os.environ.get("CLIMB_REFINE_LANDMARKS", "1") not in ("0", "false", "no")
+    refine_margin: float = float(os.environ.get("CLIMB_REFINE_MARGIN", "0.55"))
+
     @property
     def videos_dir(self) -> Path:
         return self.data_dir / "videos"

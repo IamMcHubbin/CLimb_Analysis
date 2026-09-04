@@ -364,6 +364,9 @@ function pollJob(jobId) {
 async function showResult() {
   const video = state.video;
   state.keypoints = await api(`/videos/${video.id}/keypoints`);
+  // Smoothed once, here, so the toggle is instant and the stored data stays raw.
+  state.smoothed = smoothTrack(
+    state.keypoints.frames, state.keypoints.fps, SMOOTH_MIN_CUTOFF, SMOOTH_BETA);
   show('s-play', true);
   show('s-pick', false);
 
@@ -411,6 +414,67 @@ function renderMeta() {
     .map(([label, value]) => `<tr><td>${label}</td><td>${value}</td></tr>`).join('');
 }
 
+/* One Euro filter: a low-pass whose cutoff rises with speed, so a still limb
+ * is smoothed hard and a fast one is barely touched. The usual alternative, a
+ * fixed low-pass, has to choose between jitter and lag; this does not.
+ *
+ * Applied at display time, never to the stored data. The keypoints on disk
+ * stay raw - that was the point of not shipping a filter until the raw
+ * behaviour had been seen, and it means the two can still be compared.
+ */
+function smoothTrack(frames, fps, minCutoff, beta) {
+  const dCutoff = 1.0;
+  const te = 1 / fps;
+  const alpha = (cutoff) => {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return 1 / (1 + tau / te);
+  };
+
+  const out = new Array(frames.length);
+  // Per-landmark, per-axis filter state.
+  let prev = null;
+
+  for (let i = 0; i < frames.length; i += 1) {
+    const frame = frames[i];
+    if (!frame) {
+      out[i] = null;
+      // A gap breaks continuity: smoothing across it would invent motion
+      // between two poses that were never observed as consecutive.
+      prev = null;
+      continue;
+    }
+    if (!prev) {
+      out[i] = frame.map((p) => p.slice());
+      prev = { x: frame.map((p) => [p[0], p[1]]), dx: frame.map(() => [0, 0]) };
+      continue;
+    }
+    const smoothed = [];
+    for (let k = 0; k < frame.length; k += 1) {
+      const point = [];
+      for (let axis = 0; axis < 2; axis += 1) {
+        const raw = frame[k][axis];
+        const speed = (raw - prev.x[k][axis]) * fps;
+        const dHat = prev.dx[k][axis] + alpha(dCutoff) * (speed - prev.dx[k][axis]);
+        const cutoff = minCutoff + beta * Math.abs(dHat);
+        const a = alpha(cutoff);
+        const value = prev.x[k][axis] + a * (raw - prev.x[k][axis]);
+        prev.x[k][axis] = value;
+        prev.dx[k][axis] = dHat;
+        point.push(value);
+      }
+      point.push(frame[k][2]);            // visibility passes through
+      smoothed.push(point);
+    }
+    out[i] = smoothed;
+  }
+  return out;
+}
+
+// Tuned on gym footage: enough to settle a planted foot, not so much that a
+// cutting hand lags behind the video.
+const SMOOTH_MIN_CUTOFF = 1.2;
+const SMOOTH_BETA = 0.15;
+
 // -------------------------------------------------------------- the overlay
 
 function sizeCanvas(canvas, cssWidth, cssHeight) {
@@ -448,7 +512,8 @@ function drawOverlay() {
   updateHud(index);
   drawPlayhead(index);
 
-  const landmarks = data.frames[index];
+  const source = $('smooth').checked && state.smoothed ? state.smoothed : data.frames;
+  const landmarks = source[index];
   if (!landmarks) return;   // A gap draws nothing. Never interpolated across.
 
   const toX = (x) => x * canvas.width;
@@ -501,6 +566,7 @@ function stepFrame(delta) {
   // on the neighbour.
   player.currentTime = (next + 0.5) / data.fps;
 }
+$('smooth').addEventListener('change', () => { lastHudFrame = -1; });
 $('step-back').addEventListener('click', () => stepFrame(-1));
 $('step-fwd').addEventListener('click', () => stepFrame(1));
 document.addEventListener('keydown', (event) => {
