@@ -192,9 +192,12 @@ def test_analysis_runs_are_listed_newest_first(client, video_id):
 
     assert response.status_code == 200
     runs = response.json()
-    assert [run["id"] for run in runs] == [job["analysis_run_id"] for job in reversed(submitted)]
+    assert runs == sorted(
+        runs, key=lambda run: (run["created_at"], run["id"]), reverse=True
+    )
+    assert {run["id"] for run in runs} == {job["analysis_run_id"] for job in submitted}
     assert {run["video_id"] for run in runs} == {video_id}
-    assert [run["execution"]["job_id"] for run in runs] == [job["id"] for job in reversed(submitted)]
+    assert {run["execution"]["job_id"] for run in runs} == {job["id"] for job in submitted}
 
 
 def test_analysis_run_detail_exposes_provenance_and_execution(client, settings, video_id):

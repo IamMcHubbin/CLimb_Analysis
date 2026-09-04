@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -51,12 +51,13 @@ def test_missing_video_is_none(repository):
 
 
 def test_lists_newest_first(repository):
-    older = _record("older")
-    newer = _record("newer")
-    repository.add(older)
-    repository.add(
-        VideoRecord(**{**newer.__dict__, "created_at": datetime.now(timezone.utc)})
+    now = datetime.now(timezone.utc)
+    older = VideoRecord(
+        **{**_record("older").__dict__, "created_at": now - timedelta(seconds=1)}
     )
+    newer = VideoRecord(**{**_record("newer").__dict__, "created_at": now})
+    repository.add(older)
+    repository.add(newer)
     listed = repository.list()
     assert [record.id for record in listed] == ["newer", "older"]
 

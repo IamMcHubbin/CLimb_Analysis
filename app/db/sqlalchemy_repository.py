@@ -210,9 +210,9 @@ class SqlAlchemyVideoRepository(VideoRepository):
             VideoRow.footage_deleted_at.is_(None),
             or_(
                 VideoRow.analysis_completed_at.isnot(None)
-                & (VideoRow.analysis_completed_at < analysed_before),
+                & (VideoRow.analysis_completed_at <= analysed_before),
                 VideoRow.analysis_completed_at.is_(None)
-                & (VideoRow.created_at < unanalysed_before),
+                & (VideoRow.created_at <= unanalysed_before),
             ),
         )
         return [_to_record(row) for row in self._session.scalars(stmt)]
