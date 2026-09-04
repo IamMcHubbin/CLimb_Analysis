@@ -17,6 +17,7 @@ from app.db.session import init_db, session_scope
 from app.db.sqlalchemy_repository import SqlAlchemyJobRepository
 from app.jobs.runtime import build_queue, set_queue
 from app.jobs.service import recover_unfinished_jobs
+from app.retention import FootageRetention, RetentionJanitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -39,9 +40,15 @@ async def lifespan(_app: FastAPI):
     with session_scope() as session:
         recover_unfinished_jobs(SqlAlchemyJobRepository(session), queue)
     queue.start()
+
+    janitor = RetentionJanitor(
+        FootageRetention(settings), settings.retention_sweep_seconds
+    )
+    janitor.start()
     try:
         yield
     finally:
+        janitor.stop()
         # Give the in-flight job a chance to record how it ended rather than
         # leaving its row stuck at "running".
         queue.stop(timeout=SHUTDOWN_GRACE_SECONDS)
@@ -61,6 +68,20 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/config", tags=["ops"])
+    def client_config() -> dict[str, object]:
+        """Limits the client needs to know, so they are stated in one place.
+
+        Without this the upload cap would be written down twice and drift.
+        """
+        return {
+            "max_upload_bytes": settings.max_upload_bytes,
+            "target_fps": settings.target_fps,
+            "max_long_edge": settings.max_long_edge,
+            "retain_analysed_seconds": settings.retain_analysed_seconds,
+            "retain_unanalysed_seconds": settings.retain_unanalysed_seconds,
+        }
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -7,6 +7,8 @@ services:
       # Videos, keypoints and the SQLite database survive a rebuild.
       - ./data:/data
     environment:
-      # lite | full | heavy - see the benchmark table in the README
-      CLIMB_POSE_MODEL: lite
+      # lite | full | heavy. heavy costs about twice the CPU and roughly halves
+      # landmark jitter on a small subject, which a climber up a wall always is.
+      # Drop to lite on a constrained host - see the README.
+      CLIMB_POSE_MODEL: heavy
       CLIMB_MAX_PEOPLE: "5"

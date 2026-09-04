@@ -8,7 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import deps
+from app.db.repository import JobKind
+from app.ingest.job import IngestJobHandler
 from app.main import create_app
+
+from tests.conftest import InlineJobQueue
 
 from tests.test_candidates import FakeEstimator, _person
 
@@ -22,11 +26,17 @@ def client(settings):
     def factory():
         yield estimator
 
+    from app.jobs.runtime import set_queue
+
+    inline = InlineJobQueue(settings, {JobKind.INGEST: IngestJobHandler(settings)})
+    set_queue(inline)
     app = create_app()
     app.dependency_overrides[deps.get_settings] = lambda: settings
     app.dependency_overrides[deps.get_estimator_factory] = lambda: factory
+    app.dependency_overrides[deps.get_job_queue] = lambda: inline
     with TestClient(app) as test_client:
         yield test_client
+    set_queue(None)
 
 
 @pytest.fixture

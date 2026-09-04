@@ -24,6 +24,8 @@ from app.db.sqlalchemy_repository import SqlAlchemyAnalysisRunRepository, SqlAlc
 from app.frames import FrameReader, timestamp_ms_for_frame
 from app.keypoints import KeypointMetadata, KeypointStore, ParquetKeypointStore
 from app.pose import PoseEstimator, RunningMode, create_pose_estimator
+from app.pose.refine import refine_landmarks
+from app.retention import FootageRetention
 from app.pose.base import PersonPose
 from app.tracking import IouTracker, TrackedFrame, TrackingConfig
 
@@ -60,11 +62,13 @@ class AnalysisJobHandler:
         estimator_factory: VideoEstimatorFactory | None = None,
         keypoint_store: KeypointStore | None = None,
         tracking_config: TrackingConfig | None = None,
+        retention: FootageRetention | None = None,
     ) -> None:
         self._settings = settings
         self._estimator_factory = estimator_factory
         self._store = keypoint_store or ParquetKeypointStore(settings)
         self._tracking_config = tracking_config or TrackingConfig()
+        self._retention = retention or FootageRetention(settings)
 
     def _default_estimator(
         self, variant: str | None = None, max_people: int | None = None
@@ -109,14 +113,21 @@ class AnalysisJobHandler:
                 raise AnalysisFailed("analysis run is missing or belongs to another video")
             jobs.mark_running(job_id)
 
+        # Everything below reads the run, never the live settings: the model,
+        # the thresholds and the refinement options are whatever they were when
+        # this analysis was asked for. Changing the global model must not
+        # retroactively change what a queued job does.
         tracking_config = TrackingConfig(run.min_iou, run.max_gap_frames)
         estimator_factory = self._estimator_factory or (
             lambda: self._default_estimator(run.pose_model, run.max_people)
         )
         result = self._track(
             job_id, video, run.candidate_frame_index, run.seed_box,
-            tracking_config, estimator_factory,
+            tracking_config, estimator_factory, run.refine_landmarks,
         )
+        if run.refine_landmarks:
+            # The same factory, so the second pass uses the run's model too.
+            result = self._refine(job_id, video, result, estimator_factory, run.refine_margin)
 
         metadata = KeypointMetadata(
             video_id=video.id,
@@ -131,9 +142,16 @@ class AnalysisJobHandler:
         path = self._store.write(metadata, result.frames)
 
         with session_scope() as session:
-            SqlAlchemyVideoRepository(session).set_keypoints_path(video.id, path)
+            videos = SqlAlchemyVideoRepository(session)
+            # The run's path is the authoritative one; the video's is a
+            # convenience pointer at whatever finished most recently.
             SqlAlchemyAnalysisRunRepository(session).set_keypoints_path(run.id, path)
+            videos.set_latest_keypoints_path(video.id, path)
             SqlAlchemyJobRepository(session).mark_done(job_id)
+            # Swept here as well as on the timer, so a zero retention window
+            # means the footage is gone the moment the job finishes rather
+            # than up to a sweep interval later.
+            self._retention.sweep(videos)
 
         gaps = sum(1 for frame in result.frames if frame.is_gap)
         logger.info(
@@ -152,6 +170,7 @@ class AnalysisJobHandler:
         seed_box: BoundingBox,
         tracking_config: TrackingConfig,
         estimator_factory: VideoEstimatorFactory,
+        refine_pass_follows: bool,
     ) -> TrackResult:
         video_path = self._settings.resolve(video.stored_path)
 
@@ -181,7 +200,10 @@ class AnalysisJobHandler:
                     results[frame_index] = forward.update(frame_index, people)
 
                 if frame_index % update_every == 0:
-                    self._report_progress(job_id, frame_index / max(1, video.frame_count))
+                    share = 0.5 if refine_pass_follows else 1.0
+                    self._report_progress(
+                        job_id, share * frame_index / max(1, video.frame_count)
+                    )
 
         # Backward from the seed, so the start of the clip is covered too.
         backward = IouTracker(seed_box, tracking_config)
@@ -196,6 +218,43 @@ class AnalysisJobHandler:
             ],
             landmark_names=landmark_names,
             landmark_connections=landmark_connections,
+        )
+
+    def _refine(
+        self,
+        job_id: str,
+        video: VideoRecord,
+        result: TrackResult,
+        estimator_factory: VideoEstimatorFactory,
+        margin: float,
+    ) -> TrackResult:
+        """Second pass: better landmarks from a crop around the tracked person.
+
+        Takes the run's estimator factory and margin, not the current global
+        settings, so both passes of one analysis use the same model.
+
+        A failure here is not fatal - the coarse track is still a usable
+        answer, and losing the whole job over an improvement would be a poor
+        trade.
+        """
+        video_path = self._settings.resolve(video.stored_path)
+        try:
+            with estimator_factory() as estimator, FrameReader(video_path) as reader:
+                frames = refine_landmarks(
+                    result.frames,
+                    reader,
+                    estimator,
+                    margin=margin,
+                    # The first pass covered 0-50% of the bar; this covers the rest.
+                    on_progress=lambda f: self._report_progress(job_id, 0.5 + f * 0.5),
+                )
+        except Exception:
+            logger.exception("landmark refinement failed; keeping the first-pass track")
+            return result
+        return TrackResult(
+            frames=frames,
+            landmark_names=result.landmark_names,
+            landmark_connections=result.landmark_connections,
         )
 
     def _report_progress(self, job_id: str, fraction: float) -> None:

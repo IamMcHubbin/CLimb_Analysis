@@ -10,7 +10,6 @@ from app.analysis import AnalysisJobHandler
 from app.candidates import CandidateService
 from app.db import SqlAlchemyAnalysisRunRepository, SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
 from app.db.repository import JobStatus
-from app.ingest.service import IngestService
 from app.jobs.service import JobService
 from app.keypoints import ParquetKeypointStore
 from app.pose.base import Landmark, PersonPose
@@ -55,13 +54,12 @@ def _four_point_person(x: float, y: float, size: float = 0.2) -> PersonPose:
 
 
 @pytest.fixture
-def prepared(settings, make_video):
+def prepared(settings, ingest_video):
     """A video with a stored candidate set and a queued job, ready to run."""
-    source = make_video(seconds=1.0)  # 30 frames; candidate frame is 15
+    video = ingest_video(seconds=1.0)  # 30 frames; candidate frame is 15
     queue = RecordingQueue()
     with session_scope() as session:
         videos = SqlAlchemyVideoRepository(session)
-        video = IngestService(videos, settings=settings).ingest(source, "clip.mp4")
 
         @contextmanager
         def factory():
@@ -106,8 +104,55 @@ def test_a_successful_run_stores_keypoints_and_marks_the_job_done(settings, prep
     assert data.metadata.landmark_connections == CONNECTIONS
     assert data.tracked_frame_count == video.frame_count
     assert data.gap_frame_count == 0
-    # Exactly one inference per frame, whichever direction it was tracked in.
-    assert estimator.calls == video.frame_count
+    # Two passes over the clip: one to find and track, one to refine the
+    # landmarks on a crop. One inference per frame in each.
+    assert estimator.calls == video.frame_count * 2
+
+
+def test_refinement_follows_the_run_not_current_settings(settings, ingest_video):
+    """Turning refinement off after submission must not change a queued run.
+
+    The flag is snapshotted onto the AnalysisRun, so the switch has to be off
+    when the analysis is *asked for*, not when it happens.
+    """
+    import dataclasses
+
+    from tests.test_analysis_runs import _submit
+
+    disabled = dataclasses.replace(settings, refine_landmarks=False)
+    video, job, _ = _submit(disabled, ingest_video)
+    # Global settings say refine; the run, submitted with it off, must win.
+    handler, estimator = _handler(settings, [[_four_point_person(0.2, 0.2)]] * video.frame_count)
+
+    handler(job.id)
+
+    assert estimator.calls == video.frame_count, "one pass only"
+    with session_scope() as session:
+        assert SqlAlchemyJobRepository(session).get(job.id).status is JobStatus.DONE
+
+
+def test_a_failed_refinement_keeps_the_first_pass_track(settings, prepared):
+    """An improvement that fails should not lose the answer it was improving."""
+    from contextlib import contextmanager
+
+    video, job = prepared
+    calls = {"n": 0}
+
+    @contextmanager
+    def factory():
+        calls["n"] += 1
+        if calls["n"] > 1:                       # the refinement pass
+            raise RuntimeError("crop model fell over")
+        yield ScriptedEstimator([[_four_point_person(0.4, 0.4)]] * video.frame_count)
+
+    AnalysisJobHandler(settings, estimator_factory=factory)(job.id)
+
+    with session_scope() as session:
+        assert SqlAlchemyJobRepository(session).get(job.id).status is JobStatus.DONE
+        stored = SqlAlchemyVideoRepository(session).get(video.id)
+    assert stored.keypoints_path is not None
+    data = ParquetKeypointStore(settings).read(stored.keypoints_path)
+    assert data.tracked_frame_count == video.frame_count
 
 
 def test_frames_before_the_seed_frame_are_tracked_too(settings, prepared):

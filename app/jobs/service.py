@@ -1,5 +1,11 @@
 """Submitting analysis jobs.
 
+Submitting an analysis writes two rows. The AnalysisRun is the immutable
+record of what was asked for - which person, in which frame, with which model
+and thresholds - and the job is the mutable record of one attempt to do it.
+Everything that decides the output is snapshotted onto the run at this point,
+so nothing the user changes afterwards can alter a queued analysis.
+
 Ordering matters and is easy to get wrong: the job row must be *committed*,
 not merely written, before its id goes on the queue. The worker runs on
 another thread with its own session, so an id published inside an open
@@ -16,6 +22,7 @@ from datetime import datetime, timezone
 from app.db.repository import (
     AnalysisRun,
     AnalysisRunRepository,
+    JobKind,
     JobRecord,
     JobRepository,
     JobStatus,
@@ -52,19 +59,40 @@ class JobService:
         self._settings = settings
         self._tracking_config = tracking_config or TrackingConfig()
 
+    def submit_ingest(self, video_id: str) -> JobRecord:
+        """Queue normalisation of a freshly uploaded video."""
+        job = self._jobs.add(
+            JobRecord(
+                id=uuid.uuid4().hex,
+                video_id=video_id,
+                kind=JobKind.INGEST,
+                candidate_index=None,
+                status=JobStatus.QUEUED,
+                progress=0.0,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        self._unit_of_work.commit()
+        self._queue.enqueue(job.id)
+        logger.info("queued ingest job %s for video %s", job.id, video_id)
+        return job
+
     def submit(self, video_id: str, candidate_index: int) -> JobRecord:
         """Queue an analysis of one candidate. Returns immediately."""
         candidates = self._videos.get_candidates(video_id)
         if candidates is None:
             raise UnknownCandidate("no candidates for this video; call /candidates first")
-        if candidates.get(candidate_index) is None:
-            available = [candidate.index for candidate in candidates.candidates]
+        candidate = candidates.get(candidate_index)
+        if candidate is None:
+            available = [entry.index for entry in candidates.candidates]
             raise UnknownCandidate(
                 f"no candidate {candidate_index}; available: {available}"
             )
 
-        candidate = candidates.get(candidate_index)
-        assert candidate is not None
+        # The chosen box is copied into the run here, not looked up later. The
+        # candidate set is mutable - re-running the picker replaces it - so a
+        # worker that read it at execution time could analyse a different
+        # person than the one that was picked.
         run = self._analysis_runs.add(
             AnalysisRun(
                 id=uuid.uuid4().hex,
@@ -76,6 +104,8 @@ class JobService:
                 max_gap_frames=self._tracking_config.max_gap_frames,
                 pose_model=self._settings.pose_model,
                 max_people=self._settings.max_people,
+                refine_landmarks=self._settings.refine_landmarks,
+                refine_margin=self._settings.refine_margin,
                 created_at=datetime.now(timezone.utc),
             )
         )
@@ -83,6 +113,7 @@ class JobService:
             JobRecord(
                 id=uuid.uuid4().hex,
                 video_id=video_id,
+                kind=JobKind.ANALYSIS,
                 candidate_index=candidate_index,
                 status=JobStatus.QUEUED,
                 progress=0.0,
@@ -94,7 +125,10 @@ class JobService:
         # is still inside this transaction.
         self._unit_of_work.commit()
         self._queue.enqueue(job.id)
-        logger.info("queued job %s for video %s candidate %d", job.id, video_id, candidate_index)
+        logger.info(
+            "queued job %s (run %s) for video %s candidate %d",
+            job.id, run.id, video_id, candidate_index,
+        )
         return job
 
 

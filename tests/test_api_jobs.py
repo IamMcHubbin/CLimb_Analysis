@@ -8,19 +8,55 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api import deps
+from app.db.repository import JobKind
+from app.ingest.job import IngestJobHandler
+from app.jobs.base import JobQueue
 from app.jobs.runtime import set_queue
 from app.main import create_app
 
+from tests.conftest import InlineJobQueue
 from tests.test_candidates import FakeEstimator, _person
-from tests.test_jobs import RecordingQueue
+
+
+
+class SplitQueue(JobQueue):
+    """Ingest runs inline; analysis is only recorded.
+
+    These tests are about the API's handling of jobs, not about analysis - but
+    a video still has to be normalised before it can be analysed at all.
+    """
+
+    def __init__(self, settings):
+        self._inline = InlineJobQueue(settings, {JobKind.INGEST: IngestJobHandler(settings)})
+        self.enqueued: list[str] = []
+
+    def enqueue(self, job_id: str) -> None:
+        from app.db import session_scope
+        from app.db.sqlalchemy_repository import SqlAlchemyJobRepository
+
+        with session_scope() as session:
+            job = SqlAlchemyJobRepository(session).get(job_id)
+        if job is not None and job.kind is JobKind.INGEST:
+            self._inline.enqueue(job_id)
+            return
+        self.enqueued.append(job_id)
+
+    def start(self) -> None:
+        pass
+
+    def stop(self, timeout: float | None = None) -> None:
+        pass
+
+    @property
+    def depth(self) -> int:
+        return len(self.enqueued)
 
 
 @pytest.fixture
-def queue():
-    """Swap the real worker out: these tests are about the API, not analysis."""
-    recording = RecordingQueue()
-    set_queue(recording)
-    yield recording
+def queue(settings):
+    split = SplitQueue(settings)
+    set_queue(split)
+    yield split
     set_queue(None)
 
 
@@ -119,7 +155,7 @@ def test_keypoints_are_index_aligned_with_the_video(client, settings, video_id):
         frames,
     )
     with session_scope() as session:
-        SqlAlchemyVideoRepository(session).set_keypoints_path(video_id, path)
+        SqlAlchemyVideoRepository(session).set_latest_keypoints_path(video_id, path)
 
     payload = client.get(f"/videos/{video_id}/keypoints").json()
 

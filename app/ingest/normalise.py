@@ -14,6 +14,8 @@ verifies its own output and fails loudly rather than passing on a bad file.
 from __future__ import annotations
 
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +64,10 @@ def compute_target_size(width: int, height: int, max_long_edge: int) -> tuple[in
     return _even(width * scale), _even(height * scale)
 
 
+# Called with 0.0-1.0 as the transcode advances.
+ProgressCallback = Callable[[float], None]
+
+
 def build_ffmpeg_command(
     source: Path,
     destination: Path,
@@ -85,6 +91,9 @@ def build_ffmpeg_command(
         "-nostdin",
         "-hide_banner",
         "-loglevel", "error",
+        # Machine-readable progress on stdout, so a long transcode can be
+        # reported rather than shown as an indeterminate spinner.
+        "-progress", "pipe:1",
         "-y",
         "-i", str(source),
         "-map", "0:v:0",
@@ -100,10 +109,43 @@ def build_ffmpeg_command(
     ]
 
 
+def _run_ffmpeg(
+    command: list[str],
+    duration_seconds: float,
+    on_progress: ProgressCallback | None,
+) -> None:
+    """Run ffmpeg, reporting progress as it goes.
+
+    stderr goes to a file rather than a pipe: reading stdout while stderr
+    fills its own pipe buffer is the classic way to deadlock a subprocess.
+    """
+    with tempfile.TemporaryFile("w+") as errors:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=errors, text=True
+        )
+        assert process.stdout is not None
+        try:
+            for line in process.stdout:
+                if on_progress is None or duration_seconds <= 0:
+                    continue
+                key, _, value = line.strip().partition("=")
+                if key != "out_time_ms" or not value.isdigit():
+                    continue
+                fraction = (int(value) / 1_000_000) / duration_seconds
+                on_progress(min(1.0, max(0.0, fraction)))
+        finally:
+            process.stdout.close()
+            returncode = process.wait()
+        if returncode != 0:
+            errors.seek(0)
+            raise NormalisationFailed(errors.read().strip() or "ffmpeg failed")
+
+
 def normalise_video(
     source: Path,
     destination: Path,
     settings: Settings = default_settings,
+    on_progress: ProgressCallback | None = None,
 ) -> NormalisedVideo:
     """Normalise ``source`` into ``destination`` and measure the result."""
     source_probe = probe_video(source, settings=settings)
@@ -122,9 +164,9 @@ def normalise_video(
         fps=settings.target_fps,
         settings=settings,
     )
-    proc = subprocess.run(command, capture_output=True, text=True)
-    if proc.returncode != 0 or not destination.exists():
-        raise NormalisationFailed(proc.stderr.strip() or "ffmpeg produced no output")
+    _run_ffmpeg(command, source_probe.duration_seconds, on_progress)
+    if not destination.exists():
+        raise NormalisationFailed("ffmpeg produced no output")
 
     output = probe_video(destination, settings=settings)
     if output.rotation != 0:

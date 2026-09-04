@@ -8,8 +8,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.db import SqlAlchemyAnalysisRunRepository, SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
-from app.db.repository import JobRecord, JobStatus
+from app.db import (
+    SqlAlchemyAnalysisRunRepository,
+    SqlAlchemyJobRepository,
+    SqlAlchemyVideoRepository,
+    session_scope,
+)
+from app.db.repository import JobKind, JobRecord, JobStatus
 from app.jobs.base import JobQueue
 from app.jobs.inprocess import ThreadedJobQueue
 from app.jobs.service import JobService, UnknownCandidate, recover_unfinished_jobs
@@ -95,24 +100,22 @@ def test_stop_without_start_is_harmless():
 
 
 @pytest.fixture
-def video_with_candidates(settings, make_video):
+def video_with_candidates(settings, ingest_video):
     from contextlib import contextmanager
 
     from app.candidates import CandidateService
-    from app.ingest.service import IngestService
 
     from tests.test_candidates import FakeEstimator, _person
 
-    source = make_video(seconds=1.0)
+    video = ingest_video(seconds=1.0)
     with session_scope() as session:
-        videos = SqlAlchemyVideoRepository(session)
-        video = IngestService(videos, settings=settings).ingest(source, "clip.mp4")
-
         @contextmanager
         def factory():
             yield FakeEstimator([_person(0.1, 0.1, 0.3)])
 
-        CandidateService(videos, settings, estimator_factory=factory).detect(video)
+        CandidateService(
+            SqlAlchemyVideoRepository(session), settings, estimator_factory=factory
+        ).detect(video)
     return video
 
 
@@ -188,14 +191,11 @@ def test_submitting_an_unknown_candidate_is_rejected(settings, video_with_candid
     assert queue.enqueued == []
 
 
-def test_submitting_before_candidates_exist_is_rejected(settings, make_video):
-    from app.ingest.service import IngestService
-
-    source = make_video(seconds=1.0)
+def test_submitting_before_candidates_exist_is_rejected(settings, ingest_video):
+    video = ingest_video(seconds=1.0)
     queue = RecordingQueue()
     with session_scope() as session:
         videos = SqlAlchemyVideoRepository(session)
-        video = IngestService(videos, settings=settings).ingest(source, "clip.mp4")
         service = JobService(
             SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue),
             SqlAlchemyAnalysisRunRepository(session), settings=settings,
@@ -211,6 +211,7 @@ def _job(job_id: str, status: JobStatus, video_id: str) -> JobRecord:
     return JobRecord(
         id=job_id,
         video_id=video_id,
+        kind=JobKind.ANALYSIS,
         candidate_index=0,
         status=status,
         progress=0.5 if status is JobStatus.RUNNING else 0.0,

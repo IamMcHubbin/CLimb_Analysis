@@ -31,6 +31,20 @@ class BoundingBox:
     def area(self) -> float:
         return max(0.0, self.width) * max(0.0, self.height)
 
+    def square_expanded(self, margin: float) -> "BoundingBox":
+        """A square box around the same centre, grown by ``margin``, clamped.
+
+        Square because the pose model works on a square crop and will letterbox
+        anything else, wasting the pixels the crop exists to provide. Clamped
+        to the frame, which can make the result non-square again at an edge -
+        still better than sampling outside the image.
+        """
+        half = max(self.width, self.height) * (1.0 + margin) / 2.0
+        cx, cy = self.x + self.width / 2.0, self.y + self.height / 2.0
+        x1, y1 = max(0.0, cx - half), max(0.0, cy - half)
+        x2, y2 = min(1.0, cx + half), min(1.0, cy + half)
+        return BoundingBox(x=x1, y=y1, width=max(0.0, x2 - x1), height=max(0.0, y2 - y1))
+
     def iou(self, other: "BoundingBox") -> float:
         """Intersection over union. The basis of frame-to-frame tracking."""
         left = max(self.x, other.x)

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.db import SqlAlchemyVideoRepository, session_scope
-from app.db.repository import VideoRecord
+from app.db.repository import VideoRecord, VideoStatus
 
 
 def _record(video_id: str = "abc123") -> VideoRecord:
@@ -15,6 +15,7 @@ def _record(video_id: str = "abc123") -> VideoRecord:
         id=video_id,
         original_filename="IMG_0001.MOV",
         created_at=datetime.now(timezone.utc),
+        status=VideoStatus.READY,
         stored_path=f"videos/{video_id}/normalised.mp4",
         width=1280,
         height=720,
@@ -70,13 +71,13 @@ def test_pagination(repository):
 def test_sets_keypoints_path(repository):
     stored = repository.add(_record())
     assert stored.keypoints_path is None
-    repository.set_keypoints_path(stored.id, "keypoints/abc123.parquet")
+    repository.set_latest_keypoints_path(stored.id, "keypoints/abc123.parquet")
     assert repository.get(stored.id).keypoints_path == "keypoints/abc123.parquet"
 
 
-def test_set_keypoints_path_on_unknown_video(repository):
+def test_set_latest_keypoints_path_on_unknown_video(repository):
     with pytest.raises(KeyError):
-        repository.set_keypoints_path("nope", "keypoints/nope.parquet")
+        repository.set_latest_keypoints_path("nope", "keypoints/nope.parquet")
 
 
 def test_delete(repository):

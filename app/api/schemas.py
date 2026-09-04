@@ -7,7 +7,14 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.db.repository import CandidateSet, JobRecord, JobStatus, VideoRecord
+from app.db.repository import (
+    CandidateSet,
+    JobKind,
+    JobRecord,
+    JobStatus,
+    VideoRecord,
+    VideoStatus,
+)
 
 
 class SourceInfo(BaseModel):
@@ -25,21 +32,43 @@ class VideoOut(BaseModel):
     id: str
     original_filename: str
     created_at: datetime
-    width: int
-    height: int
-    fps: float
-    frame_count: int
-    duration_seconds: float
-    size_bytes: int
+    # "pending" until normalisation finishes; the fields below are null until
+    # then, and "failed" carries the reason in ingest_error.
+    status: VideoStatus
+    ingest_error: str | None = None
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    frame_count: int | None = None
+    duration_seconds: float | None = None
+    size_bytes: int | None = None
     has_keypoints: bool
-    source: SourceInfo
+    # False once the clip has been deleted. The keypoints outlive it, so the
+    # row is still useful - there is just nothing left to play.
+    has_footage: bool
+    footage_expires_at: datetime | None
+    source: SourceInfo | None = None
 
     @classmethod
-    def from_record(cls, record: VideoRecord) -> "VideoOut":
+    def from_record(
+        cls, record: VideoRecord, footage_expires_at: datetime | None = None
+    ) -> "VideoOut":
+        source = None
+        if record.source_codec is not None:
+            source = SourceInfo(
+                width=record.source_width,
+                height=record.source_height,
+                fps=record.source_fps,
+                rotation=record.source_rotation,
+                codec=record.source_codec,
+                variable_frame_rate=bool(record.source_variable_frame_rate),
+            )
         return cls(
             id=record.id,
             original_filename=record.original_filename,
             created_at=record.created_at,
+            status=record.status,
+            ingest_error=record.ingest_error,
             width=record.width,
             height=record.height,
             fps=record.fps,
@@ -47,14 +76,9 @@ class VideoOut(BaseModel):
             duration_seconds=record.duration_seconds,
             size_bytes=record.size_bytes,
             has_keypoints=record.keypoints_path is not None,
-            source=SourceInfo(
-                width=record.source_width,
-                height=record.source_height,
-                fps=record.source_fps,
-                rotation=record.source_rotation,
-                codec=record.source_codec,
-                variable_frame_rate=record.source_variable_frame_rate,
-            ),
+            has_footage=record.has_footage,
+            footage_expires_at=footage_expires_at,
+            source=source,
         )
 
 
@@ -117,7 +141,10 @@ class AnalyseRequest(BaseModel):
 class JobOut(BaseModel):
     id: str
     video_id: str
-    candidate_index: int
+    kind: JobKind
+    # Analysis jobs only: the candidate picked, and the immutable run that
+    # records what was actually asked for.
+    candidate_index: int | None = None
     analysis_run_id: str | None = None
     status: JobStatus
     # 0-1 over the frames processed so far.
@@ -132,6 +159,7 @@ class JobOut(BaseModel):
         return cls(
             id=job.id,
             video_id=job.video_id,
+            kind=job.kind,
             candidate_index=job.candidate_index,
             analysis_run_id=job.analysis_run_id,
             status=job.status,

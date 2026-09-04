@@ -6,7 +6,6 @@ Analysis jobs and keypoints come later.
 from __future__ import annotations
 
 import logging
-import uuid
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -15,21 +14,30 @@ from fastapi.responses import FileResponse
 from app.api.deps import (
     get_candidate_service,
     get_analysis_run_repository,
+    get_job_repository,
     get_ingest_service,
     get_job_service,
     get_keypoint_store,
+    get_retention,
     get_settings,
     get_video_repository,
 )
 from app.api.schemas import AnalyseRequest, CandidatesOut, JobOut, KeypointsOut, VideoOut
 from app.candidates import CandidateService
 from app.config import Settings
-from app.db.repository import AnalysisRunRepository, VideoRecord, VideoRepository
+from app.db.repository import (
+    AnalysisRunRepository,
+    JobRepository,
+    VideoRecord,
+    VideoRepository,
+    VideoStatus,
+)
 from app.frames import FrameReadError
-from app.ingest.errors import IngestError, NormalisationFailed, UnreadableVideo
+from app.ingest.errors import IngestError
 from app.ingest.service import IngestService
 from app.jobs.service import JobService, UnknownCandidate
 from app.keypoints import KeypointStore
+from app.retention import FootageRetention
 from app.ingest.upload import EmptyUpload, UploadTooLarge, save_stream
 
 logger = logging.getLogger(__name__)
@@ -44,56 +52,50 @@ async def _chunks(upload: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-@router.post("", response_model=VideoOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=VideoOut, status_code=status.HTTP_202_ACCEPTED)
 async def upload_video(
     file: UploadFile = File(...),
     service: IngestService = Depends(get_ingest_service),
+    jobs: JobService = Depends(get_job_service),
     settings: Settings = Depends(get_settings),
+    retention: FootageRetention = Depends(get_retention),
 ) -> VideoOut:
-    """Accept a video, normalise it, and return its metadata.
+    """Accept a video and queue it for normalisation.
 
-    Normalisation is synchronous: it is an ffmpeg transcode, so a long clip
-    will hold the request open. That is deliberate for now - nothing can be
-    done with a video until it is normalised, and moving it into the job queue
-    would mean a video row that exists but is not yet usable.
+    Returns as soon as the bytes are on disk. Normalisation is a transcode of
+    the whole clip, and holding an HTTP request open for it invites a proxy
+    timeout - Cloudflare gives up on an origin after about 100 seconds - so it
+    runs on the worker instead. Poll GET /videos/{id} until its status leaves
+    "pending".
     """
-    staged = settings.uploads_dir / f"{uuid.uuid4().hex}.upload"
+    video_id = service.new_video_id()
+    staged = service.upload_destination(video_id)
     try:
         await save_stream(_chunks(file), staged, settings.max_upload_bytes)
-
-        try:
-            record = service.ingest(staged, file.filename or "upload")
-        except UnreadableVideo as exc:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=f"could not read a video stream from this file: {exc}",
-            ) from exc
-        except NormalisationFailed as exc:
-            logger.exception("normalisation failed for %s", file.filename)
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"could not normalise this video: {exc}",
-            ) from exc
+        record = service.register(video_id, file.filename or "upload")
+        jobs.submit_ingest(record.id)
     except UploadTooLarge as exc:
+        service.discard(video_id)
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=str(exc),
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc)
         ) from exc
     except EmptyUpload as exc:
+        service.discard(video_id)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
     except IngestError as exc:
+        service.discard(video_id)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    except Exception:
+        service.discard(video_id)
+        raise
     finally:
-        staged.unlink(missing_ok=True)
         await file.close()
 
-    return VideoOut.from_record(record)
+    return _video_out(record, retention)
 
 
 @router.get("", response_model=list[VideoOut])
@@ -101,8 +103,12 @@ def list_videos(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     repository: VideoRepository = Depends(get_video_repository),
+    retention: FootageRetention = Depends(get_retention),
 ) -> list[VideoOut]:
-    return [VideoOut.from_record(record) for record in repository.list(limit=limit, offset=offset)]
+    return [
+        _video_out(record, retention)
+        for record in repository.list(limit=limit, offset=offset)
+    ]
 
 
 def _require_video(repository: VideoRepository, video_id: str) -> VideoRecord:
@@ -112,12 +118,32 @@ def _require_video(repository: VideoRepository, video_id: str) -> VideoRecord:
     return record
 
 
+def _video_out(record: VideoRecord, retention: FootageRetention) -> VideoOut:
+    return VideoOut.from_record(record, footage_expires_at=retention.expires_at(record))
+
+
+def _require_ready(record: VideoRecord) -> VideoRecord:
+    """Refuse to work on a video that has not been normalised yet."""
+    if record.status is VideoStatus.FAILED:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=record.ingest_error or "this upload could not be normalised",
+        )
+    if not record.is_ready:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="this video is still being normalised; poll GET /videos/{id}",
+        )
+    return record
+
+
 @router.get("/{video_id}", response_model=VideoOut)
 def get_video(
     video_id: str,
     repository: VideoRepository = Depends(get_video_repository),
+    retention: FootageRetention = Depends(get_retention),
 ) -> VideoOut:
-    return VideoOut.from_record(_require_video(repository, video_id))
+    return _video_out(_require_video(repository, video_id), retention)
 
 
 @router.get("/{video_id}/file")
@@ -130,7 +156,12 @@ def get_video_file(
 
     Returned via FileResponse so range requests work and the browser can seek.
     """
-    record = _require_video(repository, video_id)
+    record = _require_ready(_require_video(repository, video_id))
+    if not record.has_footage:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="the footage for this video has been deleted; its keypoints remain",
+        )
     path = settings.resolve(record.stored_path)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="video file is missing")
@@ -153,7 +184,7 @@ def get_candidates(
     and re-running detection would renumber the candidates underneath the user.
     Pass a different `frame_index` if the climber is not in shot mid-clip.
     """
-    record = _require_video(repository, video_id)
+    record = _require_ready(_require_video(repository, video_id))
     try:
         if refresh:
             candidate_set = service.detect(record, frame_index)
@@ -196,7 +227,7 @@ def analyse_video(
     Poll GET /jobs/{id} for progress. Analysis takes roughly as long as the
     clip itself, so nothing useful can be returned synchronously.
     """
-    _require_video(repository, video_id)
+    _require_ready(_require_video(repository, video_id))
     try:
         job = service.submit(video_id, request.candidate_index)
     except UnknownCandidate as exc:
@@ -261,3 +292,34 @@ def get_keypoints(
         frames=frames,
         match_iou=match_iou,
     )
+
+
+@router.delete("/{video_id}/footage", response_model=VideoOut)
+def delete_footage(
+    video_id: str,
+    repository: VideoRepository = Depends(get_video_repository),
+    retention: FootageRetention = Depends(get_retention),
+) -> VideoOut:
+    """Delete the clip now, without waiting for its retention window.
+
+    The keypoints and metadata stay. Deleting footage that is already gone is
+    not an error - the caller wanted it gone, and it is.
+    """
+    record = _require_video(repository, video_id)
+    retention.delete_footage(repository, record)
+    return _video_out(_require_video(repository, video_id), retention)
+
+
+@router.get("/{video_id}/jobs", response_model=list[JobOut])
+def list_video_jobs(
+    video_id: str,
+    repository: VideoRepository = Depends(get_video_repository),
+    jobs: JobRepository = Depends(get_job_repository),
+) -> list[JobOut]:
+    """Jobs for one video, newest first.
+
+    The client uses this to find the ingest job's progress while a freshly
+    uploaded video is still being normalised.
+    """
+    _require_video(repository, video_id)
+    return [JobOut.from_record(job) for job in jobs.list_for_video(video_id)]

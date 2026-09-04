@@ -10,7 +10,6 @@ from app.db import (
     SqlAlchemyVideoRepository,
     session_scope,
 )
-from app.ingest.service import IngestService
 from app.jobs.service import JobService
 from app.keypoints import ParquetKeypointStore
 from tests.test_analysis import ScriptedEstimator, _four_point_person
@@ -18,18 +17,18 @@ from tests.test_candidates import FakeEstimator, _person
 from tests.test_jobs import RecordingQueue, _CommitTracker
 
 
-def _submit(settings, make_video):
-    source = make_video(seconds=1.0)
+def _submit(settings, ingest_video, video=None, queue=None):
+    """Detect candidates and submit an analysis, returning the queued job."""
+    video = video or ingest_video(seconds=1.0)
+    queue = queue or RecordingQueue()
     with session_scope() as session:
         videos = SqlAlchemyVideoRepository(session)
-        video = IngestService(videos, settings=settings).ingest(source, "clip.mp4")
 
         @contextmanager
         def factory():
             yield FakeEstimator([_person(0.2, 0.2, 0.2)])
 
         CandidateService(videos, settings, estimator_factory=factory).detect(video)
-        queue = RecordingQueue()
         job_service = JobService(
             SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue),
             SqlAlchemyAnalysisRunRepository(session), settings=settings,
@@ -37,8 +36,8 @@ def _submit(settings, make_video):
         return video, job_service.submit(video.id, 0), queue
 
 
-def test_two_runs_have_independent_snapshots_and_artifacts(settings, make_video):
-    video, first_job, queue = _submit(settings, make_video)
+def test_two_runs_have_independent_snapshots_and_artifacts(settings, ingest_video):
+    video, first_job, queue = _submit(settings, ingest_video)
     with session_scope() as session:
         videos = SqlAlchemyVideoRepository(session)
         runs = SqlAlchemyAnalysisRunRepository(session)

@@ -3,11 +3,13 @@ from app.db.repository import (
     AnalysisRunRepository,
     Candidate,
     CandidateSet,
+    JobKind,
     JobRecord,
     JobRepository,
     JobStatus,
     VideoRecord,
     VideoRepository,
+    VideoStatus,
 )
 from app.db.session import init_db, reset_engine, session_scope
 from app.db.sqlalchemy_repository import (
@@ -21,9 +23,11 @@ __all__ = [
     "AnalysisRunRepository",
     "Candidate",
     "CandidateSet",
+    "JobKind",
     "JobRecord",
     "JobRepository",
     "JobStatus",
+    "VideoStatus",
     "VideoRecord",
     "VideoRepository",
     "SqlAlchemyJobRepository",

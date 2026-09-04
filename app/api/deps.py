@@ -26,6 +26,7 @@ from app.jobs.base import JobQueue
 from app.jobs.runtime import get_queue
 from app.jobs.service import JobService
 from app.keypoints import KeypointStore, ParquetKeypointStore
+from app.retention import FootageRetention
 from app.pose import RunningMode, create_pose_estimator
 
 
@@ -101,3 +102,7 @@ def get_job_service(
 
 def get_keypoint_store(settings: Settings = Depends(get_settings)) -> KeypointStore:
     return ParquetKeypointStore(settings)
+
+
+def get_retention(settings: Settings = Depends(get_settings)) -> FootageRetention:
+    return FootageRetention(settings)
