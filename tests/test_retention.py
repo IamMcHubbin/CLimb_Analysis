@@ -69,7 +69,7 @@ def test_deleting_twice_is_not_an_error(settings, repository, video):
 
 def test_analysed_footage_survives_until_its_window_passes(settings, repository, video):
     settings = dataclasses.replace(settings, retain_analysed_seconds=3600)
-    repository.set_keypoints_path(video.id, "keypoints/x.parquet")
+    repository.set_latest_keypoints_path(video.id, "keypoints/x.parquet")
     retention = FootageRetention(settings)
 
     assert retention.sweep(repository) == 0
@@ -83,7 +83,7 @@ def test_analysed_footage_survives_until_its_window_passes(settings, repository,
 
 def test_zero_retention_deletes_as_soon_as_it_is_analysed(settings, repository, video):
     settings = dataclasses.replace(settings, retain_analysed_seconds=0)
-    repository.set_keypoints_path(video.id, "keypoints/x.parquet")
+    repository.set_latest_keypoints_path(video.id, "keypoints/x.parquet")
 
     assert FootageRetention(settings).sweep(repository) == 1
     assert not repository.get(video.id).has_footage
@@ -106,7 +106,7 @@ def test_unanalysed_uploads_are_swept_on_their_own_schedule(settings, repository
 
 def test_sweep_skips_footage_already_deleted(settings, repository, video):
     settings = dataclasses.replace(settings, retain_analysed_seconds=0)
-    repository.set_keypoints_path(video.id, "keypoints/x.parquet")
+    repository.set_latest_keypoints_path(video.id, "keypoints/x.parquet")
     retention = FootageRetention(settings)
 
     assert retention.sweep(repository) == 1
@@ -122,7 +122,7 @@ def test_expiry_is_reported_from_the_right_moment(settings, repository, video):
     # Before analysis, counted from upload.
     assert retention.expires_at(video) == video.created_at + timedelta(seconds=86400)
 
-    repository.set_keypoints_path(video.id, "keypoints/x.parquet")
+    repository.set_latest_keypoints_path(video.id, "keypoints/x.parquet")
     analysed = repository.get(video.id)
     assert retention.expires_at(analysed) == analysed.analysis_completed_at + timedelta(seconds=3600)
 
@@ -136,7 +136,7 @@ def test_the_janitor_sweeps_and_stops(settings, ingest_video):
 
     video = ingest_video(seconds=1.0)
     with session_scope() as session:
-        SqlAlchemyVideoRepository(session).set_keypoints_path(video.id, "keypoints/x.parquet")
+        SqlAlchemyVideoRepository(session).set_latest_keypoints_path(video.id, "keypoints/x.parquet")
     # Committed on leaving the block above; before that the janitor's session
     # could not have seen this video at all.
 

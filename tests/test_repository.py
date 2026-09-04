@@ -71,13 +71,13 @@ def test_pagination(repository):
 def test_sets_keypoints_path(repository):
     stored = repository.add(_record())
     assert stored.keypoints_path is None
-    repository.set_keypoints_path(stored.id, "keypoints/abc123.parquet")
+    repository.set_latest_keypoints_path(stored.id, "keypoints/abc123.parquet")
     assert repository.get(stored.id).keypoints_path == "keypoints/abc123.parquet"
 
 
-def test_set_keypoints_path_on_unknown_video(repository):
+def test_set_latest_keypoints_path_on_unknown_video(repository):
     with pytest.raises(KeyError):
-        repository.set_keypoints_path("nope", "keypoints/nope.parquet")
+        repository.set_latest_keypoints_path("nope", "keypoints/nope.parquet")
 
 
 def test_delete(repository):

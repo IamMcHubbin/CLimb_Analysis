@@ -8,7 +8,7 @@ import pytest
 
 from app.analysis import AnalysisJobHandler
 from app.candidates import CandidateService
-from app.db import SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
+from app.db import SqlAlchemyAnalysisRunRepository, SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
 from app.db.repository import JobStatus
 from app.jobs.service import JobService
 from app.keypoints import ParquetKeypointStore
@@ -67,7 +67,8 @@ def prepared(settings, ingest_video):
 
         CandidateService(videos, settings, estimator_factory=factory).detect(video)
         service = JobService(
-            SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue)
+            SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue),
+            SqlAlchemyAnalysisRunRepository(session), settings=settings,
         )
         job = service.submit(video.id, 0)
     return video, job
@@ -108,17 +109,24 @@ def test_a_successful_run_stores_keypoints_and_marks_the_job_done(settings, prep
     assert estimator.calls == video.frame_count * 2
 
 
-def test_refinement_can_be_turned_off(settings, prepared):
-    """Without it, one pass and one inference per frame."""
+def test_refinement_follows_the_run_not_current_settings(settings, ingest_video):
+    """Turning refinement off after submission must not change a queued run.
+
+    The flag is snapshotted onto the AnalysisRun, so the switch has to be off
+    when the analysis is *asked for*, not when it happens.
+    """
     import dataclasses
 
-    video, job = prepared
-    settings = dataclasses.replace(settings, refine_landmarks=False)
-    handler, estimator = _handler(settings, [[_four_point_person(0.4, 0.4)]] * video.frame_count)
+    from tests.test_analysis_runs import _submit
+
+    disabled = dataclasses.replace(settings, refine_landmarks=False)
+    video, job, _ = _submit(disabled, ingest_video)
+    # Global settings say refine; the run, submitted with it off, must win.
+    handler, estimator = _handler(settings, [[_four_point_person(0.2, 0.2)]] * video.frame_count)
 
     handler(job.id)
 
-    assert estimator.calls == video.frame_count
+    assert estimator.calls == video.frame_count, "one pass only"
     with session_scope() as session:
         assert SqlAlchemyJobRepository(session).get(job.id).status is JobStatus.DONE
 

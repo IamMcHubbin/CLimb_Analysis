@@ -55,7 +55,9 @@ class VideoRow(Base):
     source_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_variable_frame_rate: Mapped[bool | None] = mapped_column(Integer, nullable=True)
 
-    # Set once a pose analysis job finishes. Relative to the data directory.
+    # The most recently completed run's keypoints, kept as a convenience for
+    # callers that just want "the latest result". NOT the canonical location -
+    # AnalysisRunRow.keypoints_path is, and a video may have several runs.
     keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     analysis_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -78,9 +80,14 @@ class JobRow(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     video_id: Mapped[str] = mapped_column(String(32), ForeignKey("videos.id", ondelete="CASCADE"))
     # "ingest" normalises an upload; "analysis" tracks a chosen person. Only
-    # the latter has a candidate.
+    # the latter has a candidate or an analysis run.
     kind: Mapped[str] = mapped_column(String(16), default="analysis", index=True)
     candidate_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The immutable run this job executes. A job is the mutable record of one
+    # attempt; the run is what it was asked to do, fixed at submission.
+    analysis_run_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("analysis_runs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     status: Mapped[str] = mapped_column(String(16), index=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
@@ -93,3 +100,27 @@ class JobRow(Base):
 
     # The status endpoint is polled per video while a job runs.
     __table_args__ = (Index("ix_jobs_video_created", "video_id", "created_at"),)
+
+
+class AnalysisRunRow(Base):
+    __tablename__ = "analysis_runs"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(32), ForeignKey("videos.id", ondelete="CASCADE"), index=True)
+    candidate_frame_index: Mapped[int] = mapped_column(Integer)
+    selected_candidate_index: Mapped[int] = mapped_column(Integer)
+    seed_x: Mapped[float] = mapped_column(Float)
+    seed_y: Mapped[float] = mapped_column(Float)
+    seed_width: Mapped[float] = mapped_column(Float)
+    seed_height: Mapped[float] = mapped_column(Float)
+    min_iou: Mapped[float] = mapped_column(Float)
+    max_gap_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pose_model: Mapped[str] = mapped_column(String(32))
+    max_people: Mapped[int] = mapped_column(Integer)
+    # The second-pass settings, snapshotted for the same reason as the rest:
+    # a run has to describe what produced it, and these change its output.
+    refine_landmarks: Mapped[bool] = mapped_column(Integer, default=1)
+    refine_margin: Mapped[float] = mapped_column(Float, default=0.55)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Where this run's keypoints live. Authoritative: one file per run, so two
+    # analyses of the same video never overwrite each other.
+    keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)

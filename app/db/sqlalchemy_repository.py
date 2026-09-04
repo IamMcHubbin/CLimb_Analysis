@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import JobRow, VideoRow
+from app.db.models import AnalysisRunRow, JobRow, VideoRow
 from app.db.repository import (
     Candidate,
+    AnalysisRun,
+    AnalysisRunRepository,
     CandidateSet,
     JobKind,
     JobRecord,
@@ -153,7 +155,7 @@ class SqlAlchemyVideoRepository(VideoRepository):
         )
         return [_to_record(row) for row in self._session.scalars(stmt)]
 
-    def set_keypoints_path(self, video_id: str, path: str | None) -> None:
+    def set_latest_keypoints_path(self, video_id: str, path: str | None) -> None:
         row = self._session.get(VideoRow, video_id)
         if row is None:
             raise KeyError(video_id)
@@ -249,6 +251,7 @@ def _to_job(row: JobRow) -> JobRecord:
         started_at=_as_utc(row.started_at),
         finished_at=_as_utc(row.finished_at),
         error=row.error,
+        analysis_run_id=row.analysis_run_id,
     )
 
 
@@ -268,6 +271,7 @@ class SqlAlchemyJobRepository(JobRepository):
             started_at=job.started_at,
             finished_at=job.finished_at,
             error=job.error,
+            analysis_run_id=job.analysis_run_id,
         )
         self._session.add(row)
         self._session.flush()
@@ -324,6 +328,63 @@ class SqlAlchemyJobRepository(JobRepository):
             .order_by(JobRow.created_at)
         )
         return [_to_job(row) for row in self._session.scalars(stmt)]
+
+
+def _to_analysis_run(row: AnalysisRunRow) -> AnalysisRun:
+    return AnalysisRun(
+        id=row.id, video_id=row.video_id,
+        candidate_frame_index=row.candidate_frame_index,
+        selected_candidate_index=row.selected_candidate_index,
+        seed_box=BoundingBox(row.seed_x, row.seed_y, row.seed_width, row.seed_height),
+        min_iou=row.min_iou, max_gap_frames=row.max_gap_frames,
+        pose_model=row.pose_model, max_people=row.max_people,
+        refine_landmarks=bool(row.refine_landmarks), refine_margin=row.refine_margin,
+        created_at=_as_utc(row.created_at), keypoints_path=row.keypoints_path,
+    )
+
+
+class SqlAlchemyAnalysisRunRepository(AnalysisRunRepository):
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, run: AnalysisRun) -> AnalysisRun:
+        row = AnalysisRunRow(
+            id=run.id, video_id=run.video_id,
+            candidate_frame_index=run.candidate_frame_index,
+            selected_candidate_index=run.selected_candidate_index,
+            seed_x=run.seed_box.x, seed_y=run.seed_box.y,
+            seed_width=run.seed_box.width, seed_height=run.seed_box.height,
+            min_iou=run.min_iou, max_gap_frames=run.max_gap_frames,
+            pose_model=run.pose_model, max_people=run.max_people,
+            refine_landmarks=int(run.refine_landmarks), refine_margin=run.refine_margin,
+            created_at=run.created_at, keypoints_path=run.keypoints_path,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_analysis_run(row)
+
+    def get(self, run_id: str) -> AnalysisRun | None:
+        row = self._session.get(AnalysisRunRow, run_id)
+        return _to_analysis_run(row) if row is not None else None
+
+    def list_for_video(self, video_id: str, limit: int = 20) -> list[AnalysisRun]:
+        stmt = select(AnalysisRunRow).where(AnalysisRunRow.video_id == video_id).order_by(
+            AnalysisRunRow.created_at.desc(), AnalysisRunRow.id.desc()
+        ).limit(limit)
+        return [_to_analysis_run(row) for row in self._session.scalars(stmt)]
+
+    def set_keypoints_path(self, run_id: str, path: str) -> None:
+        row = self._session.get(AnalysisRunRow, run_id)
+        if row is None:
+            raise KeyError(run_id)
+        row.keypoints_path = path
+        self._session.flush()
+
+    def referenced_keypoint_paths(self) -> set[str]:
+        stmt = select(AnalysisRunRow.keypoints_path).where(
+            AnalysisRunRow.keypoints_path.isnot(None)
+        )
+        return {path for path in self._session.scalars(stmt) if path}
 
 
 class SqlAlchemyUnitOfWork(UnitOfWork):

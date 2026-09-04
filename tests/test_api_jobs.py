@@ -93,6 +93,7 @@ def test_analyse_returns_a_queued_job_immediately(client, video_id, queue):
     assert job["status"] == "queued"
     assert job["progress"] == 0.0
     assert job["video_id"] == video_id
+    assert job["analysis_run_id"]
     assert queue.enqueued == [job["id"]]
 
 
@@ -154,7 +155,7 @@ def test_keypoints_are_index_aligned_with_the_video(client, settings, video_id):
         frames,
     )
     with session_scope() as session:
-        SqlAlchemyVideoRepository(session).set_keypoints_path(video_id, path)
+        SqlAlchemyVideoRepository(session).set_latest_keypoints_path(video_id, path)
 
     payload = client.get(f"/videos/{video_id}/keypoints").json()
 

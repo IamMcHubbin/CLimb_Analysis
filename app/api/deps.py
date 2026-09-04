@@ -12,10 +12,11 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.config import Settings, settings as app_settings
-from app.db.repository import JobRepository, UnitOfWork, VideoRepository
+from app.db.repository import AnalysisRunRepository, JobRepository, UnitOfWork, VideoRepository
 from app.db.session import session_scope
 from app.db.sqlalchemy_repository import (
     SqlAlchemyJobRepository,
+    SqlAlchemyAnalysisRunRepository,
     SqlAlchemyUnitOfWork,
     SqlAlchemyVideoRepository,
 )
@@ -76,6 +77,10 @@ def get_job_repository(session: Session = Depends(get_session)) -> JobRepository
     return SqlAlchemyJobRepository(session)
 
 
+def get_analysis_run_repository(session: Session = Depends(get_session)) -> AnalysisRunRepository:
+    return SqlAlchemyAnalysisRunRepository(session)
+
+
 def get_job_queue() -> JobQueue:
     return get_queue()
 
@@ -89,8 +94,10 @@ def get_job_service(
     videos: VideoRepository = Depends(get_video_repository),
     queue: JobQueue = Depends(get_job_queue),
     unit_of_work: UnitOfWork = Depends(get_unit_of_work),
+    analysis_runs: AnalysisRunRepository = Depends(get_analysis_run_repository),
+    settings: Settings = Depends(get_settings),
 ) -> JobService:
-    return JobService(jobs, videos, queue, unit_of_work)
+    return JobService(jobs, videos, queue, unit_of_work, analysis_runs, settings=settings)
 
 
 def get_keypoint_store(settings: Settings = Depends(get_settings)) -> KeypointStore:

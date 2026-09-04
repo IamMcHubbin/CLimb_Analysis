@@ -4,6 +4,12 @@ The clip is the sensitive, bulky part and it stops being useful once the track
 has been extracted. The keypoints and metadata are kept - they are small, they
 are what the analysis was for, and they are not video of anybody.
 
+Keypoint files are a separate matter. Each analysis run writes its own, so a
+video can have several and none of them should go when its footage does. What
+does go is an artifact no run points at any more: one left behind by a job
+that died mid-write, or by a video whose rows have been deleted. Those are
+swept; anything a run still references never is.
+
 Two windows, because the two cases differ. An analysed video has served its
 purpose and is counted from when its analysis finished; the delay exists only
 so the overlay has something to draw on while somebody reviews it. An upload
@@ -18,11 +24,19 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from app.config import Settings, settings as default_settings
-from app.db.repository import VideoRecord, VideoRepository
+from app.db.repository import AnalysisRunRepository, VideoRecord, VideoRepository
 from app.db.session import session_scope
-from app.db.sqlalchemy_repository import SqlAlchemyVideoRepository
+from app.db.sqlalchemy_repository import (
+    SqlAlchemyAnalysisRunRepository,
+    SqlAlchemyVideoRepository,
+)
 
 logger = logging.getLogger(__name__)
+
+# How long an unreferenced artifact is left alone before it counts as an
+# orphan. Covers the window between a worker writing its file and committing
+# the path onto its run.
+ORPHAN_GRACE_SECONDS = 3600
 
 
 class FootageRetention:
@@ -53,6 +67,48 @@ class FootageRetention:
             unanalysed_before=moment - timedelta(seconds=self._settings.retain_unanalysed_seconds),
         )
         return sum(1 for video in expired if self.delete_footage(repository, video))
+
+    def sweep_orphan_artifacts(
+        self,
+        videos: VideoRepository,
+        runs: AnalysisRunRepository,
+        now: datetime | None = None,
+    ) -> int:
+        """Delete keypoint files no analysis run refers to any more.
+
+        Referenced files are never touched, so a result somebody can still ask
+        for cannot be swept out from under them. Files younger than the grace
+        period are also left alone: a job writes its artifact before recording
+        the path on its run, and that gap must not look like an orphan.
+        """
+        moment = now or datetime.now(timezone.utc)
+        keypoints_dir = self._settings.keypoints_dir
+        if not keypoints_dir.exists():
+            return 0
+
+        referenced = runs.referenced_keypoint_paths()
+        # A video's "latest" pointer counts as a reference too, so an artifact
+        # a client can still reach through the video is never an orphan.
+        for video in videos.list(limit=10_000):
+            if video.keypoints_path:
+                referenced.add(video.keypoints_path)
+
+        cutoff = moment - timedelta(seconds=ORPHAN_GRACE_SECONDS)
+        removed = 0
+        for path in keypoints_dir.glob("*.parquet"):
+            # Skip the writer's own temporary files; they start with a dot and
+            # belong to a write that has not finished.
+            if path.name.startswith("."):
+                continue
+            if self._settings.relative(path) in referenced:
+                continue
+            modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            if modified > cutoff:
+                continue
+            path.unlink(missing_ok=True)
+            logger.info("deleted orphaned keypoint artifact %s", path.name)
+            removed += 1
+        return removed
 
     def expires_at(self, video: VideoRecord) -> datetime | None:
         """When this video's footage is due to go, or None if it already has."""
@@ -100,8 +156,14 @@ class RetentionJanitor:
             thread.join(timeout)
 
     def sweep_once(self) -> int:
+        """Both sweeps: expired footage, then artifacts nothing refers to."""
         with session_scope() as session:
-            return self._retention.sweep(SqlAlchemyVideoRepository(session))
+            videos = SqlAlchemyVideoRepository(session)
+            runs = SqlAlchemyAnalysisRunRepository(session)
+            return (
+                self._retention.sweep(videos)
+                + self._retention.sweep_orphan_artifacts(videos, runs)
+            )
 
     def _run(self) -> None:
         # Sweep on startup too: the process may have been down for longer than

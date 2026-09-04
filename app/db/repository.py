@@ -61,6 +61,39 @@ class JobRecord:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
+    analysis_run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AnalysisRun:
+    """Immutable snapshot of one requested analysis.
+
+    Everything that decides what the worker produces is fixed here at
+    submission: which person, in which frame, with which model and thresholds.
+    The candidate set on the video is mutable - re-running the picker replaces
+    it - so a worker reading it at execution time could analyse a different
+    person than the one that was chosen. This is what it reads instead.
+
+    It also makes a result self-describing. Two runs over one video with
+    different models are comparable because each carries the settings that
+    produced it.
+    """
+
+    id: str
+    video_id: str
+    candidate_frame_index: int
+    selected_candidate_index: int
+    seed_box: BoundingBox
+    min_iou: float
+    max_gap_frames: int | None
+    pose_model: str
+    max_people: int
+    created_at: datetime
+    # Second-pass settings, snapshotted for the same reason as the rest.
+    refine_landmarks: bool = True
+    refine_margin: float = 0.55
+    # The authoritative location of this run's keypoints. One file per run.
+    keypoints_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +130,8 @@ class VideoRecord:
     upload_path: str | None = None
     ingest_error: str | None = None
 
+    # The most recently completed run's artifact, not the canonical one; see
+    # set_latest_keypoints_path and AnalysisRun.keypoints_path.
     keypoints_path: str | None = None
     analysis_completed_at: datetime | None = None
     footage_deleted_at: datetime | None = None
@@ -171,10 +206,15 @@ class VideoRepository(abc.ABC):
         """Most recently uploaded first."""
 
     @abc.abstractmethod
-    def set_keypoints_path(self, video_id: str, path: str | None) -> None:
-        """Point the video at its finished keypoint file, and stamp the time.
+    def set_latest_keypoints_path(self, video_id: str, path: str | None) -> None:
+        """Record the most recently completed run's artifact for this video.
 
-        The timestamp is what the retention sweep counts from.
+        A convenience for callers that just want "the latest result". The
+        authoritative per-analysis location is AnalysisRun.keypoints_path;
+        this column exists so a video can answer "has anything finished?"
+        without a join, and so older clients keep working.
+
+        Also stamps the completion time, which is what retention counts from.
         """
 
     @abc.abstractmethod
@@ -277,3 +317,32 @@ class JobRepository(abc.ABC):
     @abc.abstractmethod
     def list_unfinished(self) -> list[JobRecord]:
         """Jobs left queued or running, for recovery after a restart."""
+
+
+class AnalysisRunRepository(abc.ABC):
+    """Persistence for immutable analysis runs."""
+
+    @abc.abstractmethod
+    def add(self, run: AnalysisRun) -> AnalysisRun:
+        """Store a newly submitted run."""
+
+    @abc.abstractmethod
+    def get(self, run_id: str) -> AnalysisRun | None:
+        """Return the run, or None if it does not exist."""
+
+    @abc.abstractmethod
+    def list_for_video(self, video_id: str, limit: int = 20) -> list[AnalysisRun]:
+        """Runs for one video, newest first."""
+
+    @abc.abstractmethod
+    def set_keypoints_path(self, run_id: str, path: str) -> None:
+        """Record where this run's finished keypoints were written."""
+
+    @abc.abstractmethod
+    def referenced_keypoint_paths(self) -> set[str]:
+        """Every keypoint path any run points at.
+
+        The retention sweep needs this: an artifact is only an orphan if no
+        run claims it, and deleting a referenced one would silently destroy a
+        result somebody can still ask for.
+        """
