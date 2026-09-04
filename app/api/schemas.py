@@ -32,10 +32,16 @@ class VideoOut(BaseModel):
     duration_seconds: float
     size_bytes: int
     has_keypoints: bool
+    # False once the clip has been deleted. The keypoints outlive it, so the
+    # row is still useful - there is just nothing left to play.
+    has_footage: bool
+    footage_expires_at: datetime | None
     source: SourceInfo
 
     @classmethod
-    def from_record(cls, record: VideoRecord) -> "VideoOut":
+    def from_record(
+        cls, record: VideoRecord, footage_expires_at: datetime | None = None
+    ) -> "VideoOut":
         return cls(
             id=record.id,
             original_filename=record.original_filename,
@@ -47,6 +53,8 @@ class VideoOut(BaseModel):
             duration_seconds=record.duration_seconds,
             size_bytes=record.size_bytes,
             has_keypoints=record.keypoints_path is not None,
+            has_footage=record.has_footage,
+            footage_expires_at=footage_expires_at,
             source=SourceInfo(
                 width=record.source_width,
                 height=record.source_height,

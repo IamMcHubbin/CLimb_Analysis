@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import JobRow, VideoRow
@@ -87,6 +87,8 @@ def _to_record(row: VideoRow) -> VideoRecord:
         source_codec=row.source_codec,
         source_variable_frame_rate=bool(row.source_variable_frame_rate),
         keypoints_path=row.keypoints_path,
+        analysis_completed_at=_as_utc(row.analysis_completed_at),
+        footage_deleted_at=_as_utc(row.footage_deleted_at),
     )
 
 
@@ -109,6 +111,8 @@ def _to_row(record: VideoRecord) -> VideoRow:
         source_codec=record.source_codec,
         source_variable_frame_rate=int(record.source_variable_frame_rate),
         keypoints_path=record.keypoints_path,
+        analysis_completed_at=record.analysis_completed_at,
+        footage_deleted_at=record.footage_deleted_at,
     )
 
 
@@ -140,7 +144,31 @@ class SqlAlchemyVideoRepository(VideoRepository):
         if row is None:
             raise KeyError(video_id)
         row.keypoints_path = path
+        row.analysis_completed_at = datetime.now(timezone.utc) if path else None
         self._session.flush()
+
+    def mark_footage_deleted(self, video_id: str) -> None:
+        row = self._session.get(VideoRow, video_id)
+        if row is None:
+            raise KeyError(video_id)
+        row.footage_deleted_at = datetime.now(timezone.utc)
+        self._session.flush()
+
+    def list_footage_to_delete(
+        self,
+        analysed_before: datetime,
+        unanalysed_before: datetime,
+    ) -> list[VideoRecord]:
+        stmt = select(VideoRow).where(
+            VideoRow.footage_deleted_at.is_(None),
+            or_(
+                VideoRow.analysis_completed_at.isnot(None)
+                & (VideoRow.analysis_completed_at < analysed_before),
+                VideoRow.analysis_completed_at.is_(None)
+                & (VideoRow.created_at < unanalysed_before),
+            ),
+        )
+        return [_to_record(row) for row in self._session.scalars(stmt)]
 
     def save_candidates(self, video_id: str, candidates: CandidateSet) -> None:
         row = self._session.get(VideoRow, video_id)

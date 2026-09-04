@@ -24,6 +24,7 @@ from app.db.sqlalchemy_repository import SqlAlchemyJobRepository, SqlAlchemyVide
 from app.frames import FrameReader, timestamp_ms_for_frame
 from app.keypoints import KeypointMetadata, KeypointStore, ParquetKeypointStore
 from app.pose import PoseEstimator, RunningMode, create_pose_estimator
+from app.retention import FootageRetention
 from app.pose.base import PersonPose
 from app.tracking import IouTracker, TrackedFrame, TrackingConfig
 
@@ -60,11 +61,13 @@ class AnalysisJobHandler:
         estimator_factory: VideoEstimatorFactory | None = None,
         keypoint_store: KeypointStore | None = None,
         tracking_config: TrackingConfig | None = None,
+        retention: FootageRetention | None = None,
     ) -> None:
         self._settings = settings
         self._estimator_factory = estimator_factory or self._default_estimator
         self._store = keypoint_store or ParquetKeypointStore(settings)
         self._tracking_config = tracking_config or TrackingConfig()
+        self._retention = retention or FootageRetention(settings)
 
     def _default_estimator(self) -> AbstractContextManager[PoseEstimator]:
         # VIDEO mode: the model may use temporal context between frames.
@@ -116,8 +119,13 @@ class AnalysisJobHandler:
         path = self._store.write(metadata, result.frames)
 
         with session_scope() as session:
-            SqlAlchemyVideoRepository(session).set_keypoints_path(video.id, path)
+            videos = SqlAlchemyVideoRepository(session)
+            videos.set_keypoints_path(video.id, path)
             SqlAlchemyJobRepository(session).mark_done(job_id)
+            # Swept here as well as on the timer, so a zero retention window
+            # means the footage is gone the moment the job finishes rather
+            # than up to a sweep interval later.
+            self._retention.sweep(videos)
 
         gaps = sum(1 for frame in result.frames if frame.is_gap)
         logger.info(

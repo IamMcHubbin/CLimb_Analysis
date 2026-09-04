@@ -50,6 +50,15 @@ class VideoRow(Base):
 
     # Set once a pose analysis job finishes. Relative to the data directory.
     keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    analysis_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # When the video file itself was removed. The row outlives the footage:
+    # the keypoints are still readable, the clip is not.
+    footage_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # The candidate set, as JSON. A whole-set read and a whole-set write every
     # time, never queried by field, so a column beats a second table here.

@@ -7,9 +7,11 @@ estimation over the clip, play it back with a skeleton overlay. The question
 this is meant to answer is whether tracking quality holds up on real climbing
 footage — not to produce metrics or coaching feedback.
 
-**Current state: the loop closes.** Upload a clip, pick a person out of a
-mid-clip frame, watch the job run, then scrub the video with the skeleton drawn
-on top. No smoothing, no metrics, no hold detection.
+**Current state: the loop closes.** Drop a clip in, pick a person out of a
+frame, watch the job run, then scrub the video with the skeleton drawn on top
+and a coverage chart showing exactly where tracking held and where it did not.
+Footage is deleted once it is no longer needed; the keypoints outlive it. No
+smoothing, no metrics, no hold detection.
 
 ---
 
@@ -165,7 +167,9 @@ scripts/
   benchmark_pose.py    times pose estimation over a clip
   make_sample_clip.py  builds a phone-like test clip from a photo
   download_models.py   fetches model files
-static/index.html      the whole UI
+app/retention.py       deleting footage once it is no longer needed
+static/index.html      markup and styles
+static/app.js          the whole front end; no framework, no build step
 ```
 
 Five boundaries are deliberate, because what sits behind them is expected to
@@ -210,6 +214,29 @@ N, `null` is a gap — plus `match_iou` per frame, the tracker's confidence in
 that frame's match. Coordinates are normalised 0-1, and can fall slightly
 outside that range where the model extrapolates an occluded joint.
 
+## Footage retention
+
+The clip is the bulky, sensitive part, and it stops being useful once the track
+has been extracted. So footage is deleted and the keypoints are kept - they are
+small, they are what the analysis was for, and they are not video of anybody.
+
+Two windows, because the cases differ. An **analysed** video is counted from
+when its analysis finished; the delay exists only so the overlay has something
+to draw on while somebody reviews the result. Set
+`CLIMB_RETAIN_ANALYSED_SECONDS=0` to delete the moment a job completes, and
+accept that there is then nothing to play back. An **unanalysed** upload is
+abandoned, and counted from when it arrived.
+
+A janitor thread sweeps on a timer rather than checking on access: the promise
+is that footage is deleted, not that it is hidden from whoever asks next.
+Nobody may ever ask again, and it still has to go. `DELETE
+/videos/{id}/footage` removes a clip immediately.
+
+Once footage is gone, `GET /videos/{id}/file` returns 410 and the row reports
+`has_footage: false`. Everything else about the video still works - the
+keypoints, the coverage chart, the stats. The analysis outlives the footage,
+which is the point.
+
 ## Jobs
 
 One background thread, pulling ids off an in-process queue, running jobs one at
@@ -234,7 +261,10 @@ queue.
 | `CLIMB_DATABASE_URL` | `sqlite:///<data>/climb.db` | |
 | `CLIMB_TARGET_FPS` | `30` | Normalisation frame rate |
 | `CLIMB_MAX_LONG_EDGE` | `1280` | Normalisation size cap |
-| `CLIMB_MAX_UPLOAD_BYTES` | `1073741824` | Upload limit |
+| `CLIMB_MAX_UPLOAD_BYTES` | `52428800` | Upload limit (50 MB) |
+| `CLIMB_RETAIN_ANALYSED_SECONDS` | `3600` | Keep footage this long after analysis |
+| `CLIMB_RETAIN_UNANALYSED_SECONDS` | `86400` | Keep never-analysed uploads this long |
+| `CLIMB_RETENTION_SWEEP_SECONDS` | `60` | How often the janitor looks |
 | `CLIMB_POSE_MODEL` | `lite` | `lite`, `full` or `heavy` |
 | `CLIMB_MAX_PEOPLE` | `5` | Maximum people detected per frame |
 | `CLIMB_FFMPEG` / `CLIMB_FFPROBE` | `ffmpeg` / `ffprobe` | Binary paths |

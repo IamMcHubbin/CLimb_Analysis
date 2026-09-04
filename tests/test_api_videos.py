@@ -78,3 +78,45 @@ def test_oversized_upload_is_rejected(settings, make_video):
 def test_unknown_video_is_404(client):
     assert client.get("/videos/missing").status_code == 404
     assert client.get("/videos/missing/file").status_code == 404
+
+
+def test_upload_over_fifty_megabytes_is_rejected(settings, make_video):
+    """The default cap is 50 MB."""
+    assert settings.max_upload_bytes == 50 * 1024 * 1024
+
+
+def test_footage_can_be_deleted_on_demand(client, make_video):
+    source = make_video(seconds=1.0)
+    with source.open("rb") as handle:
+        video = client.post("/videos", files={"file": ("clip.mp4", handle, "video/mp4")}).json()
+    video_id = video["id"]
+    assert video["has_footage"] is True
+    assert client.get(f"/videos/{video_id}/file").status_code == 200
+
+    deleted = client.request("DELETE", f"/videos/{video_id}/footage").json()
+
+    assert deleted["has_footage"] is False
+    assert deleted["footage_expires_at"] is None
+    # The clip is gone; the row and its metadata are not.
+    assert client.get(f"/videos/{video_id}").json()["frame_count"] == video["frame_count"]
+    assert client.get(f"/videos/{video_id}/file").status_code == 410
+
+
+def test_deleting_footage_twice_is_not_an_error(client, make_video):
+    source = make_video(seconds=1.0)
+    with source.open("rb") as handle:
+        video_id = client.post(
+            "/videos", files={"file": ("clip.mp4", handle, "video/mp4")}
+        ).json()["id"]
+
+    assert client.request("DELETE", f"/videos/{video_id}/footage").status_code == 200
+    assert client.request("DELETE", f"/videos/{video_id}/footage").status_code == 200
+
+
+def test_an_unanalysed_video_reports_when_its_footage_expires(client, make_video):
+    source = make_video(seconds=1.0)
+    with source.open("rb") as handle:
+        video = client.post("/videos", files={"file": ("clip.mp4", handle, "video/mp4")}).json()
+
+    assert video["footage_expires_at"] is not None
+    assert video["footage_expires_at"] > video["created_at"]

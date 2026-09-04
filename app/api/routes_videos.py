@@ -17,6 +17,7 @@ from app.api.deps import (
     get_ingest_service,
     get_job_service,
     get_keypoint_store,
+    get_retention,
     get_settings,
     get_video_repository,
 )
@@ -29,6 +30,7 @@ from app.ingest.errors import IngestError, NormalisationFailed, UnreadableVideo
 from app.ingest.service import IngestService
 from app.jobs.service import JobService, UnknownCandidate
 from app.keypoints import KeypointStore
+from app.retention import FootageRetention
 from app.ingest.upload import EmptyUpload, UploadTooLarge, save_stream
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,7 @@ async def upload_video(
     file: UploadFile = File(...),
     service: IngestService = Depends(get_ingest_service),
     settings: Settings = Depends(get_settings),
+    retention: FootageRetention = Depends(get_retention),
 ) -> VideoOut:
     """Accept a video, normalise it, and return its metadata.
 
@@ -92,7 +95,7 @@ async def upload_video(
         staged.unlink(missing_ok=True)
         await file.close()
 
-    return VideoOut.from_record(record)
+    return _video_out(record, retention)
 
 
 @router.get("", response_model=list[VideoOut])
@@ -100,8 +103,12 @@ def list_videos(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     repository: VideoRepository = Depends(get_video_repository),
+    retention: FootageRetention = Depends(get_retention),
 ) -> list[VideoOut]:
-    return [VideoOut.from_record(record) for record in repository.list(limit=limit, offset=offset)]
+    return [
+        _video_out(record, retention)
+        for record in repository.list(limit=limit, offset=offset)
+    ]
 
 
 def _require_video(repository: VideoRepository, video_id: str) -> VideoRecord:
@@ -111,12 +118,17 @@ def _require_video(repository: VideoRepository, video_id: str) -> VideoRecord:
     return record
 
 
+def _video_out(record: VideoRecord, retention: FootageRetention) -> VideoOut:
+    return VideoOut.from_record(record, footage_expires_at=retention.expires_at(record))
+
+
 @router.get("/{video_id}", response_model=VideoOut)
 def get_video(
     video_id: str,
     repository: VideoRepository = Depends(get_video_repository),
+    retention: FootageRetention = Depends(get_retention),
 ) -> VideoOut:
-    return VideoOut.from_record(_require_video(repository, video_id))
+    return _video_out(_require_video(repository, video_id), retention)
 
 
 @router.get("/{video_id}/file")
@@ -130,6 +142,11 @@ def get_video_file(
     Returned via FileResponse so range requests work and the browser can seek.
     """
     record = _require_video(repository, video_id)
+    if not record.has_footage:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="the footage for this video has been deleted; its keypoints remain",
+        )
     path = settings.resolve(record.stored_path)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="video file is missing")
@@ -251,3 +268,19 @@ def get_keypoints(
         frames=frames,
         match_iou=match_iou,
     )
+
+
+@router.delete("/{video_id}/footage", response_model=VideoOut)
+def delete_footage(
+    video_id: str,
+    repository: VideoRepository = Depends(get_video_repository),
+    retention: FootageRetention = Depends(get_retention),
+) -> VideoOut:
+    """Delete the clip now, without waiting for its retention window.
+
+    The keypoints and metadata stay. Deleting footage that is already gone is
+    not an error - the caller wanted it gone, and it is.
+    """
+    record = _require_video(repository, video_id)
+    retention.delete_footage(repository, record)
+    return _video_out(_require_video(repository, video_id), retention)

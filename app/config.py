@@ -35,7 +35,20 @@ class Settings:
     target_fps: int = _env_int("CLIMB_TARGET_FPS", 30)
     max_long_edge: int = _env_int("CLIMB_MAX_LONG_EDGE", 1280)
 
-    max_upload_bytes: int = _env_int("CLIMB_MAX_UPLOAD_BYTES", 1024 * 1024 * 1024)
+    max_upload_bytes: int = _env_int("CLIMB_MAX_UPLOAD_BYTES", 50 * 1024 * 1024)
+
+    # Footage retention. Video files are deleted once they are no longer
+    # needed; the keypoints and metadata they produced are kept, being small
+    # and the actual product.
+    #
+    # The delay after analysis exists because the overlay needs the video to
+    # draw on - deleting the moment a job finishes leaves nothing to review.
+    # Set to 0 to delete as soon as analysis completes, accepting that.
+    retain_analysed_seconds: int = _env_int("CLIMB_RETAIN_ANALYSED_SECONDS", 3600)
+    # Uploads that were never analysed are abandoned; do not keep them either.
+    retain_unanalysed_seconds: int = _env_int("CLIMB_RETAIN_UNANALYSED_SECONDS", 86400)
+    # How often the janitor looks for footage that is past its time.
+    retention_sweep_seconds: int = _env_int("CLIMB_RETENTION_SWEEP_SECONDS", 60)
 
     # Set to point somewhere other than the SQLite file under data_dir.
     database_url_override: str | None = field(

@@ -68,9 +68,19 @@ class VideoRecord:
     source_variable_frame_rate: bool
 
     keypoints_path: str | None = None
+    analysis_completed_at: datetime | None = None
+    footage_deleted_at: datetime | None = None
 
     def with_keypoints_path(self, path: str | None) -> "VideoRecord":
         return replace(self, keypoints_path=path)
+
+    @property
+    def has_footage(self) -> bool:
+        return self.footage_deleted_at is None
+
+    @property
+    def is_analysed(self) -> bool:
+        return self.keypoints_path is not None
 
 
 @dataclass(frozen=True)
@@ -122,7 +132,28 @@ class VideoRepository(abc.ABC):
 
     @abc.abstractmethod
     def set_keypoints_path(self, video_id: str, path: str | None) -> None:
-        """Point the video at its finished keypoint file."""
+        """Point the video at its finished keypoint file, and stamp the time.
+
+        The timestamp is what the retention sweep counts from.
+        """
+
+    @abc.abstractmethod
+    def mark_footage_deleted(self, video_id: str) -> None:
+        """Record that the video file is gone. The row and keypoints remain."""
+
+    @abc.abstractmethod
+    def list_footage_to_delete(
+        self,
+        analysed_before: datetime,
+        unanalysed_before: datetime,
+    ) -> list["VideoRecord"]:
+        """Videos still holding footage that is past its retention window.
+
+        Two windows, because the two cases are different: an analysed video has
+        served its purpose and is counted from when analysis finished, while an
+        upload nobody ever analysed is abandoned and counted from when it
+        arrived.
+        """
 
     @abc.abstractmethod
     def save_candidates(self, video_id: str, candidates: CandidateSet) -> None:
