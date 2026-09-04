@@ -34,6 +34,10 @@ With Docker:
 docker compose up --build
 ```
 
+Deploying to Fly.io: see [docs/DEPLOY.md](docs/DEPLOY.md). Note that the app
+has no authentication, so read the first section of that before giving it a
+public address.
+
 Run the tests:
 
 ```bash

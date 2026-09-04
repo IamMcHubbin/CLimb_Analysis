@@ -1,0 +1,65 @@
+# Fly.io deployment.
+#
+# Shaped by three properties of this app, none of them negotiable:
+#
+#   1. The analysis worker is a thread inside the web process. A machine that
+#      stops while a job is running kills that job, so it must not auto-stop.
+#   2. State is SQLite and parquet files on one volume. A volume attaches to
+#      one machine, so this app runs as exactly one machine - never scaled out.
+#   3. Uploads are up to 50MB. Fly does not cap request bodies, which is why
+#      it suits this and Cloud Run (32 MiB) does not.
+#
+# Rename the app, then: fly launch --no-deploy --copy-config && fly deploy
+
+app = "climb-analysis"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  CLIMB_DATA_DIR = "/data"
+  CLIMB_MODEL_DIR = "/models"
+  CLIMB_POSE_MODEL = "lite"
+  # Footage is deleted an hour after analysis. Set to "0" to delete the moment
+  # a job finishes, accepting that there is then nothing left to play back.
+  CLIMB_RETAIN_ANALYSED_SECONDS = "3600"
+  CLIMB_RETAIN_UNANALYSED_SECONDS = "86400"
+
+# Videos, keypoints and the SQLite database. Create it once with:
+#   fly volumes create climb_data --size 3 --region lhr
+[mounts]
+  source = "climb_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+  # Deliberately false. The default true would stop the machine when traffic
+  # goes quiet, which is exactly when a long analysis job is still running.
+  auto_stop_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    # One CPU-bound worker, so queueing many uploads behind it gains nothing.
+    soft_limit = 4
+    hard_limit = 8
+
+# Uploading and normalising a 50MB clip takes a while; do not let the proxy
+# give up on a request that is still legitimately working.
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "20s"
+  method = "GET"
+  path = "/healthz"
+
+[[vm]]
+  # Pose estimation is CPU-bound and the analysis job buffers detections in
+  # memory. 1x/1024 is enough for short clips; this is sized so a few minutes
+  # of footage does not get OOM-killed halfway through.
+  size = "shared-cpu-2x"
+  memory = "2gb"
