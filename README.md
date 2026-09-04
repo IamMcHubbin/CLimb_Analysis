@@ -46,7 +46,8 @@ Run the tests:
 .venv/bin/python -m pytest tests -q
 ```
 
-CI runs the same lint and tests on every push and pull request, and separately
+CI runs the same lint and tests on every pull request and on pushes to
+`main`, and separately
 builds the Docker image and checks the container answers `/healthz` - which is
 the only thing that actually exercises the Dockerfile.
 
@@ -108,7 +109,16 @@ GET  /jobs/{id}                 status and percent complete
 GET  /videos/{id}/keypoints     the finished track, index-aligned with frames
 ```
 
-Five decisions are load-bearing:
+Six decisions are load-bearing:
+
+**Submitting an analysis freezes everything it depends on.** A run records the
+seed box, the candidate index and frame it came from, the pose model, and the
+tracking and refinement settings, at the moment it is queued. The worker reads
+the run, never live settings or the current candidate set. Without this,
+re-picking a person or changing an environment variable would silently alter a
+job already in the queue, and the result would no longer describe anything you
+could point at. Each run also owns its own keypoint file, so two runs over one
+clip can be compared instead of overwriting each other.
 
 **Candidates are stored, not recomputed.** The index a user picks only means
 something against the exact detection run that produced it, so re-detecting
@@ -176,16 +186,16 @@ app/
   tracking.py          following one person; gaps
   keypoints.py         keypoint storage interface + parquet implementation
   analysis.py          the analysis job itself
+  retention.py         deleting footage once it is no longer needed
   api/                 routes, response schemas, dependency wiring
-  db/                  repository interfaces + SQLAlchemy implementation
+  db/                  repositories: videos, jobs, candidates, analysis runs
   ingest/              ffprobe, ffmpeg normalisation, upload streaming
   jobs/                queue interface, worker thread, submission
-  pose/                pose estimator interface + MediaPipe implementation
+  pose/                pose estimator interface, MediaPipe, crop refinement
 scripts/
   benchmark_pose.py    times pose estimation over a clip
   make_sample_clip.py  builds a phone-like test clip from a photo
   download_models.py   fetches model files
-app/retention.py       deleting footage once it is no longer needed
 static/index.html      markup and styles
 static/app.js          the whole front end; no framework, no build step
 ```
@@ -202,7 +212,7 @@ change:
 - **`app.jobs.base.JobQueue`** — one thread today, a broker later. It carries
   job ids and nothing else, which is what keeps that swap cheap.
 - **`app.db.repository`** — routes and workers deal in `VideoRecord`,
-  `JobRecord` and `CandidateSet`, never ORM objects.
+  `JobRecord`, `CandidateSet` and `AnalysisRun`, never ORM objects.
 
 `app.ingest` holds everything that knows about ffmpeg.
 
@@ -218,14 +228,19 @@ change:
 | `GET /videos/{id}/candidates/frame.jpg` | That frame, to draw the boxes on |
 | `POST /videos/{id}/analyse` | Queue analysis of a chosen candidate |
 | `GET /jobs/{id}` | Job status and percent complete |
-| `GET /videos/{id}/keypoints` | The finished track |
+| `GET /videos/{id}/jobs` | Jobs for one video, newest first |
+| `GET /videos/{id}/keypoints` | A finished track — latest, or `?analysis_run_id=` |
+| `DELETE /videos/{id}/footage` | Delete the clip now, keep the keypoints |
 | `GET /healthz` | Liveness |
 
-Upload normalisation is synchronous, so a long clip holds the request open. It
-is deliberate: nothing can be done with a video until it is normalised, and
-deferring it would mean a video row that exists but is not yet usable.
-Candidate detection costs a second or two, and is cached after the first call.
-Analysis is queued and polled.
+Upload returns as soon as the bytes are on disk; normalisation is queued, and
+the video stays `pending` until a worker has finished with it. Candidate
+detection costs a second or two, and is cached after the first call. Analysis
+is queued and polled.
+
+`/keypoints` serves the video's most recently completed track by default. Pass
+`?analysis_run_id=` to ask for a specific run's, which is how two runs over the
+same clip can be compared.
 
 `/keypoints` returns `frames` index-aligned with the video — entry N is frame
 N, `null` is a gap — plus `match_iou` per frame, the tracker's confidence in
@@ -249,6 +264,12 @@ A janitor thread sweeps on a timer rather than checking on access: the promise
 is that footage is deleted, not that it is hidden from whoever asks next.
 Nobody may ever ask again, and it still has to go. `DELETE
 /videos/{id}/footage` removes a clip immediately.
+
+The same janitor sweeps orphaned keypoint files — artifacts no run and no
+video refers to any more, left behind by a job that died mid-write or by rows
+since deleted. Anything still referenced is never touched, and a one-hour grace
+period covers the window between a worker writing its file and recording the
+path.
 
 Once footage is gone, `GET /videos/{id}/file` returns 410 and the row reports
 `has_footage: false`. Everything else about the video still works - the
@@ -285,6 +306,8 @@ queue.
 | `CLIMB_RETENTION_SWEEP_SECONDS` | `60` | How often the janitor looks |
 | `CLIMB_POSE_MODEL` | `lite` | `lite`, `full` or `heavy` |
 | `CLIMB_MAX_PEOPLE` | `5` | Maximum people detected per frame |
+| `CLIMB_REFINE_LANDMARKS` | `1` | Second pose pass on a crop around the tracked person |
+| `CLIMB_REFINE_MARGIN` | `0.55` | How much context to leave around that crop |
 | `CLIMB_FFMPEG` / `CLIMB_FFPROBE` | `ffmpeg` / `ffprobe` | Binary paths |
 
 ## What it does on real footage
@@ -360,8 +383,9 @@ is not enough to tune that. Footage with two climbers on the same wall is the
 next useful input, since that is the case where re-acquiring the wrong person
 is actually possible.
 
-**No smoothing filter**, deliberately — the raw jitter is the thing to see
-first.
+**Runs are recorded but not browsable.** Every analysis writes an immutable
+run, and the API can serve any of them, but the front end only ever shows the
+newest. Listing them is the obvious next piece of UI.
 
 Known rough edges:
 
