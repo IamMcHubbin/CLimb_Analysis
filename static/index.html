@@ -49,6 +49,8 @@
     background: var(--accent); color: #0d1017; border: 0; border-radius: 7px;
     padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
     font-family: inherit;
+    /* 44px is the touch target people can actually hit on a phone. */
+    min-height: 44px;
   }
   button:disabled { opacity: .4; cursor: default; }
   button.ghost {
@@ -81,12 +83,18 @@
     padding: 10px 14px; cursor: pointer; font-size: 14px;
   }
   .lib-item:hover { background: var(--panel-2); }
-  .lib-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* min-width:0 is what lets a flex child actually shrink and ellipsise;
+     without it the tags squeeze the name down to a single character. */
+  .lib-item .name { flex: 1 1 auto; min-width: 4em; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
+  .lib-item .tags { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap;
+                    justify-content: flex-end; }
   .lib-item .tag {
     font-size: 11px; padding: 2px 7px; border-radius: 20px; white-space: nowrap;
     border: 1px solid var(--line); color: var(--muted);
   }
   .lib-item .tag.ok { color: var(--good); border-color: #2b4638; }
+  .lib-item .tag.bad { color: var(--bad); border-color: #4a2f2c; }
   .lib-item .tag.gone { color: var(--faint); }
 
   /* ------------------------------------------------------- candidate picker */
@@ -116,6 +124,16 @@
   .hud b { color: var(--text); font-weight: 600; }
   .hud .st-gap { color: var(--gap); }
   .hud .st-ok { color: var(--track); }
+  .hud button { min-width: 44px; padding: 6px 12px; }
+
+  @media (max-width: 560px) {
+    body { padding: 20px 12px 48px; }
+    section { padding: 16px 14px; }
+    .lib-item { flex-wrap: wrap; }
+    .lib-item .name { flex-basis: 100%; }
+    .lib-item .tags { justify-content: flex-start; }
+    .row > button { flex: 1 1 auto; }
+  }
 
   /* ------------------------------------------------------------- the charts */
   figure { margin: 18px 0 0; }
@@ -230,9 +248,10 @@
     <table class="meta" id="meta"></table>
 
     <div class="row" style="margin-top:16px">
+      <button class="ghost" id="repick">Track someone else</button>
       <button class="danger" id="delete-footage">Delete footage now</button>
-      <span class="note" id="retention-note"></span>
     </div>
+    <p class="note" id="retention-note"></p>
   </section>
 </main>
 <script src="/static/app.js"></script>

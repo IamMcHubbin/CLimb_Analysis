@@ -10,7 +10,6 @@ from app.analysis import AnalysisJobHandler
 from app.candidates import CandidateService
 from app.db import SqlAlchemyJobRepository, SqlAlchemyVideoRepository, session_scope
 from app.db.repository import JobStatus
-from app.ingest.service import IngestService
 from app.jobs.service import JobService
 from app.keypoints import ParquetKeypointStore
 from app.pose.base import Landmark, PersonPose
@@ -55,13 +54,12 @@ def _four_point_person(x: float, y: float, size: float = 0.2) -> PersonPose:
 
 
 @pytest.fixture
-def prepared(settings, make_video):
+def prepared(settings, ingest_video):
     """A video with a stored candidate set and a queued job, ready to run."""
-    source = make_video(seconds=1.0)  # 30 frames; candidate frame is 15
+    video = ingest_video(seconds=1.0)  # 30 frames; candidate frame is 15
     queue = RecordingQueue()
     with session_scope() as session:
         videos = SqlAlchemyVideoRepository(session)
-        video = IngestService(videos, settings=settings).ingest(source, "clip.mp4")
 
         @contextmanager
         def factory():

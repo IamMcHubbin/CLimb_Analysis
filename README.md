@@ -34,9 +34,10 @@ With Docker:
 docker compose up --build
 ```
 
-Deploying to Fly.io: see [docs/DEPLOY.md](docs/DEPLOY.md). Note that the app
-has no authentication, so read the first section of that before giving it a
-public address.
+Deploying it somewhere: [docs/DEPLOY.md](docs/DEPLOY.md) for Fly.io,
+[docs/SELF_HOST.md](docs/SELF_HOST.md) for your own machine behind a
+Cloudflare tunnel. The app has no authentication, so read the section on that
+in either before giving it a public address.
 
 Run the tests:
 
@@ -95,14 +96,14 @@ Reproduce, with your own clip or a generated one:
 ## How it works
 
 ```
-POST /videos            ffmpeg normalise -> row in SQLite
+POST /videos            take the bytes, queue normalisation -> pending video
 GET  /videos/{id}/candidates    pose on one frame -> numbered boxes + a JPEG
 POST /videos/{id}/analyse       queue a job for the chosen box -> job id
 GET  /jobs/{id}                 status and percent complete
 GET  /videos/{id}/keypoints     the finished track, index-aligned with frames
 ```
 
-Four decisions are load-bearing:
+Five decisions are load-bearing:
 
 **Candidates are stored, not recomputed.** The index a user picks only means
 something against the exact detection run that produced it, so re-detecting
@@ -123,6 +124,13 @@ person is often the closest one - a spotter directly below, a queue at the base
 - so snapping would produce a track that looks plausible and is wrong. Gaps are
 absent rows in the parquet file and nulls in the API response, and the overlay
 draws nothing for them.
+
+**Upload does not wait for ffmpeg.** Normalising a clip is a transcode of the
+whole thing, and holding an HTTP request open for it invites a proxy timeout -
+Cloudflare gives up on an origin after about 100 seconds. So the request only
+takes delivery of the bytes and queues the work; the video is `pending` until
+the worker has normalised it, and the client polls. ffmpeg reports its own
+progress, so the wait has a number on it rather than a spinner.
 
 **A job is committed before its id is queued.** The worker is another thread
 with its own session; an id published inside an open transaction points at a

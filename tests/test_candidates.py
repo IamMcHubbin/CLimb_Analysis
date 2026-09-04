@@ -48,14 +48,9 @@ def _factory(estimator):
 
 
 @pytest.fixture
-def video(settings, make_video):
+def video(settings, ingest_video):
     """A real normalised video row, so frame reading is genuine."""
-    from app.ingest.service import IngestService
-
-    source = make_video(seconds=2.0)
-    with session_scope() as session:
-        service = IngestService(SqlAlchemyVideoRepository(session), settings=settings)
-        return service.ingest(source, "clip.mp4")
+    return ingest_video(seconds=2.0)
 
 
 @pytest.fixture

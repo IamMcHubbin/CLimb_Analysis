@@ -15,6 +15,23 @@ from enum import Enum
 from app.geometry import BoundingBox
 
 
+class VideoStatus(str, Enum):
+    """Where an upload has got to.
+
+    A video is PENDING from the moment its bytes land until ffmpeg has
+    normalised it. Only a READY video has metadata; see ``require_ready``.
+    """
+
+    PENDING = "pending"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class JobKind(str, Enum):
+    INGEST = "ingest"
+    ANALYSIS = "analysis"
+
+
 class JobStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -35,7 +52,9 @@ class JobRecord:
 
     id: str
     video_id: str
-    candidate_index: int
+    kind: JobKind
+    # Only analysis jobs have one.
+    candidate_index: int | None
     status: JobStatus
     progress: float
     created_at: datetime
@@ -46,26 +65,37 @@ class JobRecord:
 
 @dataclass(frozen=True)
 class VideoRecord:
-    """A normalised video and the provenance of the upload it came from."""
+    """An upload, and once it has been normalised, the video it became.
+
+    Everything below ``status`` is None until normalisation finishes, because
+    none of it is known before ffmpeg has run: not the frame count, not the
+    real dimensions, not even whether the file was a video at all. Code that
+    needs those values should go through ``require_ready`` rather than
+    assuming.
+    """
 
     id: str
     original_filename: str
     created_at: datetime
+    status: VideoStatus
 
     stored_path: str
-    width: int
-    height: int
-    fps: float
-    frame_count: int
-    duration_seconds: float
-    size_bytes: int
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    frame_count: int | None = None
+    duration_seconds: float | None = None
+    size_bytes: int | None = None
 
-    source_width: int
-    source_height: int
-    source_fps: float
-    source_rotation: int
-    source_codec: str
-    source_variable_frame_rate: bool
+    source_width: int | None = None
+    source_height: int | None = None
+    source_fps: float | None = None
+    source_rotation: int | None = None
+    source_codec: str | None = None
+    source_variable_frame_rate: bool | None = None
+
+    upload_path: str | None = None
+    ingest_error: str | None = None
 
     keypoints_path: str | None = None
     analysis_completed_at: datetime | None = None
@@ -73,6 +103,16 @@ class VideoRecord:
 
     def with_keypoints_path(self, path: str | None) -> "VideoRecord":
         return replace(self, keypoints_path=path)
+
+    @property
+    def is_ready(self) -> bool:
+        return self.status is VideoStatus.READY
+
+    def require_ready(self) -> "VideoRecord":
+        """Return self, or raise if the video has no metadata yet."""
+        if not self.is_ready:
+            raise VideoNotReady(self.id, self.status)
+        return self
 
     @property
     def has_footage(self) -> bool:
@@ -138,6 +178,14 @@ class VideoRepository(abc.ABC):
         """
 
     @abc.abstractmethod
+    def mark_ready(self, video_id: str, normalised: "VideoRecord") -> None:
+        """Fill in the metadata a finished normalisation produced."""
+
+    @abc.abstractmethod
+    def mark_ingest_failed(self, video_id: str, error: str) -> None:
+        """Record that this upload could not be normalised."""
+
+    @abc.abstractmethod
     def mark_footage_deleted(self, video_id: str) -> None:
         """Record that the video file is gone. The row and keypoints remain."""
 
@@ -166,6 +214,15 @@ class VideoRepository(abc.ABC):
     @abc.abstractmethod
     def delete(self, video_id: str) -> bool:
         """Remove the row. Returns False if it was not there."""
+
+
+class VideoNotReady(RuntimeError):
+    """Raised when a video's metadata is used before normalisation finished."""
+
+    def __init__(self, video_id: str, status: "VideoStatus") -> None:
+        super().__init__(f"video {video_id} is {status.value}, not ready")
+        self.video_id = video_id
+        self.status = status
 
 
 class UnitOfWork(abc.ABC):

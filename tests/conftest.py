@@ -8,8 +8,21 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import shutil  # noqa: E402
+import uuid  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+
 from app.config import Settings  # noqa: E402
-from app.db import init_db, reset_engine  # noqa: E402
+from app.db import init_db, reset_engine, session_scope  # noqa: E402
+from app.db.repository import JobKind, JobRecord, JobStatus  # noqa: E402
+from app.db.sqlalchemy_repository import (  # noqa: E402
+    SqlAlchemyJobRepository,
+    SqlAlchemyVideoRepository,
+)
+from app.ingest.job import IngestJobHandler  # noqa: E402
+from app.ingest.service import IngestService  # noqa: E402
+from app.jobs.base import JobQueue  # noqa: E402
+from app.jobs.dispatch import JobDispatcher  # noqa: E402
 
 
 @pytest.fixture
@@ -73,3 +86,67 @@ def make_video(tmp_path):
         return current
 
     return _make
+
+
+@pytest.fixture
+def ingest_video(settings, make_video):
+    """Upload and normalise a clip, synchronously, and return the ready video.
+
+    Runs the real ingest job rather than reaching past it, so tests get the
+    same VideoRecord the application would produce.
+    """
+
+    def _ingest(filename: str = "clip.mp4", **clip) -> object:
+        source = make_video(**clip)
+        with session_scope() as session:
+            service = IngestService(SqlAlchemyVideoRepository(session), settings=settings)
+            video_id = service.new_video_id()
+            destination = service.upload_destination(video_id)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            service.register(video_id, filename)
+            job = SqlAlchemyJobRepository(session).add(
+                JobRecord(
+                    id=uuid.uuid4().hex,
+                    video_id=video_id,
+                    kind=JobKind.INGEST,
+                    candidate_index=None,
+                    status=JobStatus.QUEUED,
+                    progress=0.0,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+        # Committed above; the handler opens its own session, as it does in
+        # production where it runs on the worker thread.
+        IngestJobHandler(settings)(job.id)
+        with session_scope() as session:
+            return SqlAlchemyVideoRepository(session).get(video_id)
+
+    return _ingest
+
+
+class InlineJobQueue(JobQueue):
+    """Runs each job the moment it is enqueued, on the calling thread.
+
+    Lets API tests assert on finished state without threads or polling, while
+    still going through the real dispatcher and handlers - and still only
+    seeing jobs whose rows were committed first.
+    """
+
+    def __init__(self, settings: Settings, handlers) -> None:
+        self._dispatch = JobDispatcher(handlers)
+        self.enqueued: list[str] = []
+
+    def enqueue(self, job_id: str) -> None:
+        self.enqueued.append(job_id)
+        self._dispatch(job_id)
+
+    def start(self) -> None:
+        pass
+
+    def stop(self, timeout: float | None = None) -> None:
+        pass
+
+    @property
+    def depth(self) -> int:
+        return 0

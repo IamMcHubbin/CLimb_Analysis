@@ -10,7 +10,6 @@ import pytest
 
 from app.candidates import CandidateService
 from app.db import SqlAlchemyVideoRepository, session_scope
-from app.ingest.service import IngestService
 from app.retention import FootageRetention, RetentionJanitor
 
 from tests.test_candidates import FakeEstimator, _person
@@ -23,9 +22,10 @@ def repository():
 
 
 @pytest.fixture
-def video(settings, make_video, repository):
-    source = make_video(seconds=1.0)
-    return IngestService(repository, settings=settings).ingest(source, "clip.mp4")
+def video(settings, ingest_video, repository):
+    ready = ingest_video(seconds=1.0)
+    # Re-read through this test's session so later writes here are visible.
+    return repository.get(ready.id)
 
 
 def _file(settings, record):
@@ -130,15 +130,13 @@ def test_expiry_is_reported_from_the_right_moment(settings, repository, video):
     assert retention.expires_at(repository.get(video.id)) is None
 
 
-def test_the_janitor_sweeps_and_stops(settings, make_video):
+def test_the_janitor_sweeps_and_stops(settings, ingest_video):
     """The janitor opens its own session, so it only sees committed rows."""
     settings = dataclasses.replace(settings, retain_analysed_seconds=0)
 
-    source = make_video(seconds=1.0)
+    video = ingest_video(seconds=1.0)
     with session_scope() as session:
-        repository = SqlAlchemyVideoRepository(session)
-        video = IngestService(repository, settings=settings).ingest(source, "clip.mp4")
-        repository.set_keypoints_path(video.id, "keypoints/x.parquet")
+        SqlAlchemyVideoRepository(session).set_keypoints_path(video.id, "keypoints/x.parquet")
     # Committed on leaving the block above; before that the janitor's session
     # could not have seen this video at all.
 

@@ -28,25 +28,32 @@ class VideoRow(Base):
     original_filename: Mapped[str] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+    # pending until normalisation finishes, then ready or failed. Every column
+    # below is null while pending - none of it is known until ffmpeg has run.
+    status: Mapped[str] = mapped_column(String(16), index=True, default="pending")
+    ingest_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The raw upload, kept only until it has been normalised.
+    upload_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     # The normalised video: constant fps, rotation baked in, long edge capped.
     # Path is relative to the data directory. The original is never kept.
     stored_path: Mapped[str] = mapped_column(String(512))
-    width: Mapped[int] = mapped_column(Integer)
-    height: Mapped[int] = mapped_column(Integer)
-    fps: Mapped[float] = mapped_column(Float)
-    frame_count: Mapped[int] = mapped_column(Integer)
-    duration_seconds: Mapped[float] = mapped_column(Float)
-    size_bytes: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frame_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # What the upload looked like before normalisation. Kept for debugging
     # ingest problems - orientation and frame timing bugs are invisible
     # afterwards, so the evidence has to be recorded here.
-    source_width: Mapped[int] = mapped_column(Integer)
-    source_height: Mapped[int] = mapped_column(Integer)
-    source_fps: Mapped[float] = mapped_column(Float)
-    source_rotation: Mapped[int] = mapped_column(Integer)
-    source_codec: Mapped[str] = mapped_column(String(64))
-    source_variable_frame_rate: Mapped[bool] = mapped_column(Integer)
+    source_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_fps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_rotation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_codec: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_variable_frame_rate: Mapped[bool | None] = mapped_column(Integer, nullable=True)
 
     # Set once a pose analysis job finishes. Relative to the data directory.
     keypoints_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -70,7 +77,10 @@ class JobRow(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     video_id: Mapped[str] = mapped_column(String(32), ForeignKey("videos.id", ondelete="CASCADE"))
-    candidate_index: Mapped[int] = mapped_column(Integer)
+    # "ingest" normalises an upload; "analysis" tracks a chosen person. Only
+    # the latter has a candidate.
+    kind: Mapped[str] = mapped_column(String(16), default="analysis", index=True)
+    candidate_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), index=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0)

@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.db.repository import (
+    JobKind,
     JobRecord,
     JobRepository,
     JobStatus,
@@ -42,6 +43,24 @@ class JobService:
         self._queue = queue
         self._unit_of_work = unit_of_work
 
+    def submit_ingest(self, video_id: str) -> JobRecord:
+        """Queue normalisation of a freshly uploaded video."""
+        job = self._jobs.add(
+            JobRecord(
+                id=uuid.uuid4().hex,
+                video_id=video_id,
+                kind=JobKind.INGEST,
+                candidate_index=None,
+                status=JobStatus.QUEUED,
+                progress=0.0,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        self._unit_of_work.commit()
+        self._queue.enqueue(job.id)
+        logger.info("queued ingest job %s for video %s", job.id, video_id)
+        return job
+
     def submit(self, video_id: str, candidate_index: int) -> JobRecord:
         """Queue an analysis of one candidate. Returns immediately."""
         candidates = self._videos.get_candidates(video_id)
@@ -57,6 +76,7 @@ class JobService:
             JobRecord(
                 id=uuid.uuid4().hex,
                 video_id=video_id,
+                kind=JobKind.ANALYSIS,
                 candidate_index=candidate_index,
                 status=JobStatus.QUEUED,
                 progress=0.0,

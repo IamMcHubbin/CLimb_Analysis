@@ -113,10 +113,7 @@ function upload(file) {
     if (!event.lengthComputable) return;
     const percent = Math.round((event.loaded / event.total) * 100);
     bar.firstElementChild.style.width = `${percent}%`;
-    if (percent >= 100) {
-      // The bytes are up; ffmpeg still has to transcode the whole clip.
-      setStatus('upload-status', 'Normalising — constant frame rate, rotation baked in…');
-    }
+    if (percent >= 100) setStatus('upload-status', 'Uploaded. Waiting for normalisation…');
   });
   request.addEventListener('load', async () => {
     bar.hidden = true;
@@ -127,12 +124,14 @@ function upload(file) {
       setStatus('upload-status', `Upload failed (${request.status})`, true);
       return;
     }
-    if (request.status !== 201) {
+    if (request.status !== 202) {
       setStatus('upload-status', payload.detail || `Upload failed (${request.status})`, true);
       return;
     }
-    setStatus('upload-status', `Stored as ${payload.id}`);
-    await openVideo(payload);
+    // The bytes are in; ffmpeg has not run yet. The server answers straight
+    // away so no proxy times out waiting on a transcode, which means the
+    // client has to wait for "ready" itself.
+    await waitForNormalisation(payload);
     refreshLibrary();
   });
   request.addEventListener('error', () => {
@@ -140,6 +139,52 @@ function upload(file) {
     setStatus('upload-status', 'Upload failed: the connection dropped', true);
   });
   request.send(body);
+}
+
+async function waitForNormalisation(video) {
+  const bar = $('up-bar');
+  bar.hidden = false;
+  bar.firstElementChild.style.width = '0%';
+  setStatus('upload-status', 'Normalising — constant frame rate, rotation baked in…');
+
+  while (true) {
+    let current;
+    try {
+      current = await api(`/videos/${video.id}`);
+    } catch (error) {
+      setStatus('upload-status', error.message, true);
+      bar.hidden = true;
+      return;
+    }
+    if (current.status === 'ready') {
+      bar.hidden = true;
+      setStatus('upload-status', `Ready — ${current.frame_count} frames at ${current.fps}fps`);
+      await openVideo(current);
+      return;
+    }
+    if (current.status === 'failed') {
+      bar.hidden = true;
+      setStatus('upload-status', current.ingest_error || 'Normalisation failed', true);
+      return;
+    }
+    // Progress comes from the ingest job, which reads it out of ffmpeg.
+    const job = await ingestJobFor(video.id);
+    if (job) {
+      const percent = Math.round(job.progress * 100);
+      bar.firstElementChild.style.width = `${percent}%`;
+      setStatus('upload-status', `Normalising — ${percent}%`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+async function ingestJobFor(videoId) {
+  try {
+    const jobs = await api(`/videos/${videoId}/jobs`);
+    return jobs.find((job) => job.kind === 'ingest') || null;
+  } catch {
+    return null;
+  }
 }
 
 // ------------------------------------------------------------------ library
@@ -156,15 +201,17 @@ async function refreshLibrary() {
   for (const video of videos) {
     const row = document.createElement('div');
     row.className = 'lib-item';
-    const when = new Date(video.created_at).toLocaleString();
     const tags = [];
+    if (video.status === 'pending') tags.push('<span class="tag">normalising…</span>');
+    if (video.status === 'failed') tags.push('<span class="tag bad">failed</span>');
+    if (video.duration_seconds) {
+      tags.push(`<span class="tag">${video.duration_seconds.toFixed(0)}s</span>`);
+    }
     if (video.has_keypoints) tags.push('<span class="tag ok">analysed</span>');
     if (!video.has_footage) tags.push('<span class="tag gone">footage deleted</span>');
     row.innerHTML =
-      `<span class="name">${video.original_filename}</span>` +
-      `<span class="tag">${video.duration_seconds.toFixed(0)}s</span>` +
-      tags.join('') +
-      `<span class="tag">${when}</span>`;
+      `<span class="name" title="${video.original_filename}">${video.original_filename}</span>` +
+      `<span class="tags">${tags.join('')}</span>`;
     row.addEventListener('click', () => openVideo(video));
     $('lib').appendChild(row);
   }
@@ -178,6 +225,14 @@ async function openVideo(video) {
   clearInterval(state.poll);
   ['s-pick', 's-progress', 's-play'].forEach((id) => show(id, false));
 
+  if (video.status === 'pending') {
+    await waitForNormalisation(video);
+    return;
+  }
+  if (video.status === 'failed') {
+    setStatus('upload-status', video.ingest_error || 'This upload could not be normalised', true);
+    return;
+  }
   if (video.has_keypoints) {
     await showResult();
     return;
@@ -319,6 +374,9 @@ async function showResult() {
   show('stage', hasFootage);
   show('no-footage', !hasFootage);
   $('delete-footage').disabled = !hasFootage;
+  // Re-picking needs the clip: both the candidate frame and the re-analysis
+  // read from it.
+  $('repick').disabled = !hasFootage;
   ['step-back', 'step-fwd'].forEach((id) => { $(id).disabled = !hasFootage; });
 
   if (hasFootage) {
@@ -663,6 +721,15 @@ function updateRetentionNote() {
   render();
   state.retentionTick = setInterval(render, 10000);
 }
+
+$('repick').addEventListener('click', async () => {
+  // Straight back to the picker on the frame the last choice came from, so a
+  // track that followed the wrong person can be redone without re-uploading.
+  const stored = state.candidates ? state.candidates.frame_index : undefined;
+  show('s-play', false);
+  await loadCandidates(stored);
+  $('s-pick').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 $('delete-footage').addEventListener('click', async () => {
   if (!confirm('Delete the video file now? The keypoints and the charts stay.')) return;

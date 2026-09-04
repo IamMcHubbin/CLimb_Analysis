@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.db import SqlAlchemyVideoRepository, session_scope
-from app.db.repository import VideoRecord
+from app.db.repository import VideoRecord, VideoStatus
 
 
 def _record(video_id: str = "abc123") -> VideoRecord:
@@ -15,6 +15,7 @@ def _record(video_id: str = "abc123") -> VideoRecord:
         id=video_id,
         original_filename="IMG_0001.MOV",
         created_at=datetime.now(timezone.utc),
+        status=VideoStatus.READY,
         stored_path=f"videos/{video_id}/normalised.mp4",
         width=1280,
         height=720,
