@@ -281,6 +281,16 @@ class SqlAlchemyJobRepository(JobRepository):
         row = self._session.get(JobRow, job_id)
         return _to_job(row) if row is not None else None
 
+    def get_for_analysis_run(self, run_id: str) -> JobRecord | None:
+        stmt = (
+            select(JobRow)
+            .where(JobRow.analysis_run_id == run_id)
+            .order_by(JobRow.created_at.desc(), JobRow.id.desc())
+            .limit(1)
+        )
+        row = self._session.scalar(stmt)
+        return _to_job(row) if row is not None else None
+
     def list_for_video(self, video_id: str, limit: int = 20) -> list[JobRecord]:
         stmt = (
             select(JobRow)

@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.db.repository import (
+    AnalysisRun,
     CandidateSet,
     JobKind,
     JobRecord,
@@ -168,6 +169,109 @@ class JobOut(BaseModel):
             started_at=job.started_at,
             finished_at=job.finished_at,
             error=job.error,
+        )
+
+
+class AnalysisExecutionOut(BaseModel):
+    """Mutable job state associated with an immutable analysis run."""
+
+    job_id: str
+    status: JobStatus
+    progress: float
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+
+    @classmethod
+    def from_record(cls, job: JobRecord) -> "AnalysisExecutionOut":
+        return cls(
+            job_id=job.id,
+            status=job.status,
+            progress=job.progress,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            error=job.error,
+        )
+
+
+class PoseConfigurationOut(BaseModel):
+    model: str
+    max_people: int
+
+
+class TrackingConfigurationOut(BaseModel):
+    min_iou: float
+    max_gap_frames: int | None
+
+
+class AnalysisRunSummaryOut(BaseModel):
+    id: str
+    video_id: str
+    created_at: datetime
+    selected_candidate_index: int
+    pose_model: str
+    result_available: bool
+    execution: AnalysisExecutionOut | None
+
+    @classmethod
+    def from_records(
+        cls, run: AnalysisRun, job: JobRecord | None
+    ) -> "AnalysisRunSummaryOut":
+        return cls(
+            id=run.id,
+            video_id=run.video_id,
+            created_at=run.created_at,
+            selected_candidate_index=run.selected_candidate_index,
+            pose_model=run.pose_model,
+            result_available=run.keypoints_path is not None,
+            execution=AnalysisExecutionOut.from_record(job) if job is not None else None,
+        )
+
+
+class AnalysisRunDetailOut(BaseModel):
+    id: str
+    video_id: str
+    created_at: datetime
+    seed_frame_index: int
+    selected_candidate_index: int
+    seed_bounding_box: BoxOut
+    pose_configuration: PoseConfigurationOut
+    tracking_configuration: TrackingConfigurationOut
+    result_available: bool
+    keypoints_url: str | None
+    execution: AnalysisExecutionOut | None
+
+    @classmethod
+    def from_records(
+        cls, run: AnalysisRun, job: JobRecord | None
+    ) -> "AnalysisRunDetailOut":
+        return cls(
+            id=run.id,
+            video_id=run.video_id,
+            created_at=run.created_at,
+            seed_frame_index=run.candidate_frame_index,
+            selected_candidate_index=run.selected_candidate_index,
+            seed_bounding_box=BoxOut(
+                x=run.seed_box.x,
+                y=run.seed_box.y,
+                width=run.seed_box.width,
+                height=run.seed_box.height,
+            ),
+            pose_configuration=PoseConfigurationOut(
+                model=run.pose_model,
+                max_people=run.max_people,
+            ),
+            tracking_configuration=TrackingConfigurationOut(
+                min_iou=run.min_iou,
+                max_gap_frames=run.max_gap_frames,
+            ),
+            result_available=run.keypoints_path is not None,
+            keypoints_url=(
+                f"/videos/{run.video_id}/keypoints?analysis_run_id={run.id}"
+                if run.keypoints_path is not None
+                else None
+            ),
+            execution=AnalysisExecutionOut.from_record(job) if job is not None else None,
         )
 
 

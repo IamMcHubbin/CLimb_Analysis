@@ -295,6 +295,10 @@ class JobRepository(abc.ABC):
         """Return the job, or None if it does not exist."""
 
     @abc.abstractmethod
+    def get_for_analysis_run(self, run_id: str) -> JobRecord | None:
+        """Return the execution job associated with an analysis run."""
+
+    @abc.abstractmethod
     def list_for_video(self, video_id: str, limit: int = 20) -> list[JobRecord]:
         """Jobs for one video, newest first."""
 
