@@ -57,6 +57,7 @@ def test_analyse_returns_a_queued_job_immediately(client, video_id, queue):
     assert job["status"] == "queued"
     assert job["progress"] == 0.0
     assert job["video_id"] == video_id
+    assert job["analysis_run_id"]
     assert queue.enqueued == [job["id"]]
 
 

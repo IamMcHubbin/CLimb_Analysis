@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 
 from app.api.deps import (
     get_candidate_service,
+    get_analysis_run_repository,
     get_ingest_service,
     get_job_service,
     get_keypoint_store,
@@ -23,7 +24,7 @@ from app.api.deps import (
 from app.api.schemas import AnalyseRequest, CandidatesOut, JobOut, KeypointsOut, VideoOut
 from app.candidates import CandidateService
 from app.config import Settings
-from app.db.repository import VideoRecord, VideoRepository
+from app.db.repository import AnalysisRunRepository, VideoRecord, VideoRepository
 from app.frames import FrameReadError
 from app.ingest.errors import IngestError, NormalisationFailed, UnreadableVideo
 from app.ingest.service import IngestService
@@ -210,15 +211,23 @@ def get_keypoints(
     video_id: str,
     repository: VideoRepository = Depends(get_video_repository),
     store: KeypointStore = Depends(get_keypoint_store),
+    analysis_run_id: str | None = Query(None),
+    runs: AnalysisRunRepository = Depends(get_analysis_run_repository),
 ) -> KeypointsOut:
     """The finished track, index-aligned with the video's frames."""
     record = _require_video(repository, video_id)
-    if record.keypoints_path is None:
+    path = record.keypoints_path
+    if analysis_run_id is not None:
+        run = runs.get(analysis_run_id)
+        if run is None or run.video_id != video_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown analysis run")
+        path = run.keypoints_path
+    if path is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="this video has not been analysed yet",
         )
-    data = store.read(record.keypoints_path)
+    data = store.read(path)
 
     # Rounded to four decimals: that is a fifth of a pixel at 1280 wide, and it
     # roughly halves the size of the response for a long clip.
@@ -240,6 +249,7 @@ def get_keypoints(
 
     return KeypointsOut(
         video_id=record.id,
+        analysis_run_id=analysis_run_id or data.metadata.analysis_run_id,
         fps=data.metadata.fps,
         frame_count=data.metadata.frame_count,
         landmark_names=list(data.metadata.landmark_names),

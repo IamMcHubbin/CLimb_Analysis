@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -46,6 +46,17 @@ def init_db(settings: Settings = default_settings) -> None:
         _engine = _create_engine(settings)
         _session_factory = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     Base.metadata.create_all(_engine)
+    # The project previously had no analysis_runs table or job foreign key.
+    # Keep existing SQLite installations usable with this small additive
+    # migration; a formal migration tool can replace this as the schema grows.
+    if "jobs" in inspect(_engine).get_table_names():
+        columns = {column["name"] for column in inspect(_engine).get_columns("jobs")}
+        if "analysis_run_id" not in columns:
+            with _engine.begin() as connection:
+                connection.execute(text("ALTER TABLE jobs ADD COLUMN analysis_run_id VARCHAR(32)"))
+                connection.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_jobs_analysis_run_id ON jobs (analysis_run_id)"
+                ))
 
 
 def get_session_factory() -> sessionmaker[Session]:

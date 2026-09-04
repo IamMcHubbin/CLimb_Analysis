@@ -118,6 +118,7 @@ class JobOut(BaseModel):
     id: str
     video_id: str
     candidate_index: int
+    analysis_run_id: str | None = None
     status: JobStatus
     # 0-1 over the frames processed so far.
     progress: float
@@ -132,6 +133,7 @@ class JobOut(BaseModel):
             id=job.id,
             video_id=job.video_id,
             candidate_index=job.candidate_index,
+            analysis_run_id=job.analysis_run_id,
             status=job.status,
             progress=job.progress,
             created_at=job.created_at,
@@ -150,6 +152,7 @@ class KeypointsOut(BaseModel):
     """
 
     video_id: str
+    analysis_run_id: str | None = None
     fps: float
     frame_count: int
     landmark_names: list[str]
