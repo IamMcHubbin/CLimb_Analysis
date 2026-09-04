@@ -45,7 +45,7 @@ def test_two_runs_have_independent_snapshots_and_artifacts(settings, make_video)
         # Replacing candidates must not mutate the first run's seed.
         CandidateService(
             videos, settings,
-            estimator_factory=lambda: _factory(FakeEstimator([_person(0.7, 0.7, 0.1)])),
+            estimator_factory=_factory(FakeEstimator([_person(0.7, 0.7, 0.1)])),
         ).detect(video, frame_index=3)
         second_job = JobService(
             SqlAlchemyJobRepository(session), videos, queue, _CommitTracker(session, queue),
@@ -58,9 +58,9 @@ def test_two_runs_have_independent_snapshots_and_artifacts(settings, make_video)
     assert first_run.seed_box != second_run.seed_box
 
     old_person = [_four_point_person(0.2, 0.2)] * video.frame_count
-    first_handler = AnalysisJobHandler(settings, estimator_factory=lambda: _scripted(old_person))
+    first_handler = AnalysisJobHandler(settings, estimator_factory=_scripted(old_person))
     first_handler(first_job.id)
-    second_handler = AnalysisJobHandler(settings, estimator_factory=lambda: _scripted(old_person))
+    second_handler = AnalysisJobHandler(settings, estimator_factory=_scripted(old_person))
     second_handler(second_job.id)
 
     with session_scope() as session:
