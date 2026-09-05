@@ -46,18 +46,20 @@ runs through a WSL2 VM.
 
 ## Running the app
 
-The commands below are the same on Windows as on Linux/macOS - run them from
-PowerShell, Command Prompt, or a WSL2 shell, whichever Docker Desktop is
-already using. The one difference is Docker Desktop itself: open
-**Settings → General** and enable **"Start Docker Desktop when you log in"**,
-otherwise nothing in this doc restarts automatically after a reboot, because
-the Docker daemon on Windows only exists while Docker Desktop is running.
+Same commands on every OS - run them from PowerShell, Command Prompt, a WSL2
+shell, or a Linux/macOS terminal, whichever Docker Desktop (or Docker Engine)
+is already using:
 
 ```bash
 git clone https://github.com/IamMcHubbin/CLimb_Analysis.git
 cd CLimb_Analysis
 docker compose up -d --build
 ```
+
+**Windows only:** open Docker Desktop's **Settings → General** and enable
+**"Start Docker Desktop when you log in."** Without it, nothing in this doc
+restarts automatically after a reboot, because the Docker daemon on Windows
+only exists while Docker Desktop is running - see "Reboots and updates" below.
 
 That serves on `http://localhost:8000`, storing everything under `./data`.
 
@@ -75,36 +77,62 @@ environment:
 
 ## The tunnel
 
-Install `cloudflared` first:
+Pick your OS below - each block is the complete sequence for that OS, so you
+only need to follow one of them top to bottom.
+
+### Windows
 
 ```powershell
-# Windows (PowerShell)
 winget install --id Cloudflare.cloudflared
-```
-
-```bash
-# Linux (Debian/Ubuntu)
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-sudo install cloudflared /usr/local/bin/cloudflared
-```
-
-Then authenticate and create the tunnel - identical commands either way:
-
-```
 cloudflared tunnel login
 cloudflared tunnel create climb
 cloudflared tunnel route dns climb climb.example.com
 ```
 
-`cloudflared` writes credentials into a `.cloudflared` folder in your home
-directory on every OS. Put the config next to them: `~/.cloudflared/config.yml`
-on Linux/macOS, `%USERPROFILE%\.cloudflared\config.yml` on Windows (e.g.
+`cloudflared` already created a `.cloudflared` folder in your home directory
+during `tunnel login`. Put the config there:
+`%USERPROFILE%\.cloudflared\config.yml` (e.g.
 `C:\Users\you\.cloudflared\config.yml`).
 
 ```yaml
 tunnel: climb
-# Linux/macOS: /home/you/.cloudflared/<tunnel-id>.json
-# Windows:     C:/Users/you/.cloudflared/<tunnel-id>.json  (forward slashes are fine)
+credentials-file: C:/Users/you/.cloudflared/<tunnel-id>.json   # forward slashes are fine
+ingress:
+  - hostname: climb.example.com
+    service: http://localhost:8000
+    originRequest:
+      # Normalisation and analysis are queued, so requests are short - but a
+      # 100MB upload over a slow phone connection is not.
+      connectTimeout: 30s
+  - service: http_status:404
+```
+
+Run it by hand with `cloudflared tunnel run climb`, or install it as a
+service so it comes back after a reboot - from an **elevated** (Administrator)
+PowerShell or Command Prompt:
+
+```powershell
+cloudflared service install
+```
+
+This registers a service named `cloudflared`, visible in `services.msc`;
+`cloudflared service uninstall` (also elevated) removes it.
+
+### Linux / macOS
+
+```bash
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+sudo install cloudflared /usr/local/bin/cloudflared
+cloudflared tunnel login
+cloudflared tunnel create climb
+cloudflared tunnel route dns climb climb.example.com
+```
+
+`cloudflared` already created a `.cloudflared` folder in your home directory
+during `tunnel login`. Put the config there: `~/.cloudflared/config.yml`.
+
+```yaml
+tunnel: climb
 credentials-file: /home/you/.cloudflared/<tunnel-id>.json
 ingress:
   - hostname: climb.example.com
@@ -116,21 +144,12 @@ ingress:
   - service: http_status:404
 ```
 
-Then `cloudflared tunnel run climb`, or install it as a service so it comes
-back after a reboot:
-
-```powershell
-# Windows - run from an elevated (Administrator) PowerShell or Command Prompt
-cloudflared service install
-```
+Run it by hand with `cloudflared tunnel run climb`, or install it as a
+service so it comes back after a reboot:
 
 ```bash
-# Linux
 sudo cloudflared service install
 ```
-
-On Windows this registers a service named `cloudflared`, visible in
-`services.msc`; `cloudflared service uninstall` (also elevated) removes it.
 
 ## Locking it down
 
@@ -172,13 +191,15 @@ add anything that does, queue it rather than doing it inline.
 ## Reboots and updates
 
 `docker-compose.yml` sets `restart: unless-stopped`, and `cloudflared service
-install` handles the tunnel, so the machine coming back up is enough - **with
-one Windows-specific catch**: that restart policy only takes effect once the
-Docker daemon is running again, and on Windows the daemon lives inside Docker
-Desktop, which does not start on its own unless you enabled "Start Docker
-Desktop when you log in" (see Running the app, above). Without that setting,
-the container simply stays down after a reboot until you notice and open
-Docker Desktop by hand.
+install` handles the tunnel, so the machine coming back up is enough to bring
+the app back.
+
+**Windows only:** that restart policy only takes effect once the Docker
+daemon is running again, and the daemon lives inside Docker Desktop, which
+does not start on its own unless you enabled "Start Docker Desktop when you
+log in" (see "Running the app," above). Without that setting, the container
+simply stays down after a reboot until you notice and open Docker Desktop by
+hand.
 
 To update:
 

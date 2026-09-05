@@ -28,12 +28,21 @@ change nobody has made yet - it is listed under "what this still needs".
 
 ## First deploy
 
+Install `flyctl` for your OS - everything after this step is one set of
+commands, identical on both:
+
 ```bash
-# 1. Install flyctl and sign in
-#    macOS/Linux:
+# macOS/Linux
 curl -L https://fly.io/install.sh | sh
-#    Windows (PowerShell):
-#    powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+```
+
+```powershell
+# Windows (PowerShell)
+powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+```
+
+```bash
+# 1. Sign in
 fly auth login
 
 # 2. Claim an app name. Edit `app = ` in fly.toml first if you want a
