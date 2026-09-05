@@ -58,8 +58,15 @@
   }
   button.ghost:hover:not(:disabled) { color: var(--text); border-color: var(--faint); }
   button.danger { background: transparent; color: var(--bad); border: 1px solid #4a2f2c; }
+  select {
+    background: #0f1116; color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 9px 10px; font: inherit; min-width: 0;
+  }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .spacer { flex: 1; }
+  .run-picker { margin-bottom: 14px; }
+  .run-picker label { color: var(--muted); font-size: 13px; }
+  .run-picker select { flex: 1 1 360px; }
 
   /* ---------------------------------------------------------------- upload */
   .drop {
@@ -204,6 +211,12 @@
 
   <section id="s-play" hidden>
     <h2><span class="step">4</span> Result</h2>
+
+    <div class="row run-picker" id="run-picker" hidden>
+      <label for="analysis-run">Analysis run</label>
+      <select id="analysis-run"></select>
+      <span class="status" id="run-status"></span>
+    </div>
 
     <div class="stage" id="stage">
       <video id="player" controls playsinline preload="metadata"></video>

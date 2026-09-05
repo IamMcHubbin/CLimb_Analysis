@@ -210,9 +210,9 @@ class SqlAlchemyVideoRepository(VideoRepository):
             VideoRow.footage_deleted_at.is_(None),
             or_(
                 VideoRow.analysis_completed_at.isnot(None)
-                & (VideoRow.analysis_completed_at < analysed_before),
+                & (VideoRow.analysis_completed_at <= analysed_before),
                 VideoRow.analysis_completed_at.is_(None)
-                & (VideoRow.created_at < unanalysed_before),
+                & (VideoRow.created_at <= unanalysed_before),
             ),
         )
         return [_to_record(row) for row in self._session.scalars(stmt)]
@@ -279,6 +279,16 @@ class SqlAlchemyJobRepository(JobRepository):
 
     def get(self, job_id: str) -> JobRecord | None:
         row = self._session.get(JobRow, job_id)
+        return _to_job(row) if row is not None else None
+
+    def get_for_analysis_run(self, run_id: str) -> JobRecord | None:
+        stmt = (
+            select(JobRow)
+            .where(JobRow.analysis_run_id == run_id)
+            .order_by(JobRow.created_at.desc(), JobRow.id.desc())
+            .limit(1)
+        )
+        row = self._session.scalar(stmt)
         return _to_job(row) if row is not None else None
 
     def list_for_video(self, video_id: str, limit: int = 20) -> list[JobRecord]:

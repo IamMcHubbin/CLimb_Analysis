@@ -22,6 +22,8 @@ const state = {
   candidates: null,
   selected: null,
   keypoints: null,
+  analysisRuns: [],
+  selectedRunId: null,
   poll: null,
   retentionTick: null,
 };
@@ -222,6 +224,9 @@ async function refreshLibrary() {
 async function openVideo(video) {
   state.video = video;
   state.keypoints = null;
+  state.analysisRuns = [];
+  state.selectedRunId = null;
+  $('run-picker').hidden = true;
   clearInterval(state.poll);
   ['s-pick', 's-progress', 's-play'].forEach((id) => show(id, false));
 
@@ -323,14 +328,15 @@ $('analyse').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ candidate_index: state.selected }),
     });
-    pollJob(job.id);
+    pollJob(job.id, job.analysis_run_id);
+    await refreshAnalysisRuns(job.analysis_run_id);
   } catch (error) {
     setStatus('job-status', error.message, true);
     $('analyse').disabled = false;
   }
 });
 
-function pollJob(jobId) {
+function pollJob(jobId, runId) {
   clearInterval(state.poll);
   state.poll = setInterval(async () => {
     let job;
@@ -349,21 +355,72 @@ function pollJob(jobId) {
       clearInterval(state.poll);
       $('analyse').disabled = false;
       state.video = await api(`/videos/${state.video.id}`);
-      await showResult();
+      await showResult(runId);
       refreshLibrary();
     } else if (job.status === 'failed') {
       clearInterval(state.poll);
       $('analyse').disabled = false;
       setStatus('job-status', `failed: ${job.error}`, true);
+      await refreshAnalysisRuns(runId);
     }
   }, 1000);
 }
 
 // ------------------------------------------------------------------- result
 
-async function showResult() {
+async function loadAnalysisRuns(selectedRunId = state.selectedRunId) {
+  state.analysisRuns = await api(`/videos/${state.video.id}/analysis-runs`);
+  const picker = $('run-picker');
+  picker.hidden = state.analysisRuns.length === 0;
+  if (picker.hidden) return;
+
+  const select = $('analysis-run');
+  select.replaceChildren();
+  const completed = [];
+  for (const run of state.analysisRuns) {
+    const executionState = run.execution ? run.execution.status : 'unknown';
+    const option = document.createElement('option');
+    option.value = run.id;
+    option.textContent = `${new Date(run.created_at).toLocaleString()} · candidate ` +
+      `${run.selected_candidate_index} · ${run.pose_model} · ${executionState}`;
+    option.disabled = !run.result_available;
+    if (run.result_available) completed.push(run);
+    select.appendChild(option);
+  }
+
+  const selected = completed.find((run) => run.id === selectedRunId) || completed[0];
+  select.disabled = !selected;
+  if (selected) {
+    select.value = selected.id;
+    state.selectedRunId = selected.id;
+  }
+  setStatus('run-status', `${completed.length} available`);
+}
+
+async function refreshAnalysisRuns(selectedRunId = state.selectedRunId) {
+  try {
+    await loadAnalysisRuns(selectedRunId);
+  } catch (error) {
+    setStatus('run-status', error.message, true);
+  }
+}
+
+$('analysis-run').addEventListener('change', async () => {
+  const runId = $('analysis-run').value;
+  if (!runId) return;
+  try {
+    await showResult(runId);
+  } catch (error) {
+    setStatus('run-status', error.message, true);
+  }
+});
+
+async function showResult(analysisRunId = null) {
   const video = state.video;
-  state.keypoints = await api(`/videos/${video.id}/keypoints`);
+  const query = analysisRunId ? `?analysis_run_id=${encodeURIComponent(analysisRunId)}` : '';
+  state.keypoints = await api(`/videos/${video.id}/keypoints${query}`);
+  state.selectedRunId = state.keypoints.analysis_run_id;
+  await refreshAnalysisRuns(state.selectedRunId);
   // Smoothed once, here, so the toggle is instant and the stored data stays raw.
   state.smoothed = smoothTrack(
     state.keypoints.frames, state.keypoints.fps, SMOOTH_MIN_CUTOFF, SMOOTH_BETA);
@@ -802,7 +859,7 @@ $('delete-footage').addEventListener('click', async () => {
   $('delete-footage').disabled = true;
   try {
     state.video = await api(`/videos/${state.video.id}/footage`, { method: 'DELETE' });
-    await showResult();
+    await showResult(state.selectedRunId);
     refreshLibrary();
   } catch (error) {
     setStatus('no-footage', error.message, true);

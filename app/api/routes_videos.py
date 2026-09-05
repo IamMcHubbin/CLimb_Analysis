@@ -22,7 +22,15 @@ from app.api.deps import (
     get_settings,
     get_video_repository,
 )
-from app.api.schemas import AnalyseRequest, CandidatesOut, JobOut, KeypointsOut, VideoOut
+from app.api.schemas import (
+    AnalyseRequest,
+    AnalysisRunDetailOut,
+    AnalysisRunSummaryOut,
+    CandidatesOut,
+    JobOut,
+    KeypointsOut,
+    VideoOut,
+)
 from app.candidates import CandidateService
 from app.config import Settings
 from app.db.repository import (
@@ -237,6 +245,37 @@ def analyse_video(
     return JobOut.from_record(job)
 
 
+@router.get("/{video_id}/analysis-runs", response_model=list[AnalysisRunSummaryOut])
+def list_analysis_runs(
+    video_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    videos: VideoRepository = Depends(get_video_repository),
+    runs: AnalysisRunRepository = Depends(get_analysis_run_repository),
+    jobs: JobRepository = Depends(get_job_repository),
+) -> list[AnalysisRunSummaryOut]:
+    """Runs for a video, newest first by creation time and then run ID."""
+    _require_video(videos, video_id)
+    return [
+        AnalysisRunSummaryOut.from_records(run, jobs.get_for_analysis_run(run.id))
+        for run in runs.list_for_video(video_id, limit=limit)
+    ]
+
+
+@router.get("/{video_id}/analysis-runs/{run_id}", response_model=AnalysisRunDetailOut)
+def get_analysis_run(
+    video_id: str,
+    run_id: str,
+    videos: VideoRepository = Depends(get_video_repository),
+    runs: AnalysisRunRepository = Depends(get_analysis_run_repository),
+    jobs: JobRepository = Depends(get_job_repository),
+) -> AnalysisRunDetailOut:
+    _require_video(videos, video_id)
+    run = runs.get(run_id)
+    if run is None or run.video_id != video_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown analysis run")
+    return AnalysisRunDetailOut.from_records(run, jobs.get_for_analysis_run(run.id))
+
+
 @router.get("/{video_id}/keypoints", response_model=KeypointsOut)
 def get_keypoints(
     video_id: str,
@@ -245,7 +284,7 @@ def get_keypoints(
     analysis_run_id: str | None = Query(None),
     runs: AnalysisRunRepository = Depends(get_analysis_run_repository),
 ) -> KeypointsOut:
-    """The finished track, index-aligned with the video's frames."""
+    """A run's finished track, or the video's latest completed track by default."""
     record = _require_video(repository, video_id)
     path = record.keypoints_path
     if analysis_run_id is not None:
@@ -253,6 +292,11 @@ def get_keypoints(
         if run is None or run.video_id != video_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown analysis run")
         path = run.keypoints_path
+        if path is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="this analysis run does not have a completed result",
+            )
     if path is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
