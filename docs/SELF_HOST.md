@@ -50,6 +50,15 @@ Same commands on every OS - run them from PowerShell, Command Prompt, a WSL2
 shell, or a Linux/macOS terminal, whichever Docker Desktop (or Docker Engine)
 is already using:
 
+**Windows prerequisite:** Docker Desktop needs the current Store-serviced WSL2,
+not the older Windows inbox command. Run `wsl --version` first. If that prints
+the `wsl.exe` usage text instead of version numbers, run this from an elevated
+PowerShell and reboot before starting Docker Desktop:
+
+```powershell
+wsl --install --no-distribution --web-download
+```
+
 ```bash
 git clone https://github.com/IamMcHubbin/CLimb_Analysis.git
 cd CLimb_Analysis
@@ -75,10 +84,38 @@ environment:
   CLIMB_MAX_UPLOAD_BYTES: "104857600"        # 100MB
 ```
 
+## Temporary testing without a domain
+
+A Quick Tunnel is useful for an occasional remote test before the app warrants
+a domain. It creates a new random `*.trycloudflare.com` URL each time and exists
+only while the command is running:
+
+```powershell
+# Windows: install once, then run the tunnel when it is needed
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel --url http://localhost:8000
+```
+
+```bash
+# Linux/macOS, once cloudflared is installed
+cloudflared tunnel --url http://localhost:8000
+```
+
+The URL is public and a Quick Tunnel has no authentication. Anyone who obtains
+it can use the app and see its retained videos, so use only non-sensitive test
+footage and do not leave it running. Press **Ctrl+C** in that terminal to shut
+off public access. Run the same command again to restart it; Cloudflare will
+issue a different URL.
+
+Quick Tunnels are for testing, have no uptime guarantee, and should not be
+installed as a service. Use the named tunnel and Access setup below when the app
+needs a stable, authenticated address.
+
 ## The tunnel
 
-Pick your OS below - each block is the complete sequence for that OS, so you
-only need to follow one of them top to bottom.
+For a permanent authenticated address, pick your OS below. Each block is the
+complete sequence for that OS, so you only need to follow one of them top to
+bottom.
 
 ### Windows
 
@@ -86,7 +123,6 @@ only need to follow one of them top to bottom.
 winget install --id Cloudflare.cloudflared
 cloudflared tunnel login
 cloudflared tunnel create climb
-cloudflared tunnel route dns climb climb.example.com
 ```
 
 `cloudflared` already created a `.cloudflared` folder in your home directory
@@ -125,7 +161,6 @@ curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloud
 sudo install cloudflared /usr/local/bin/cloudflared
 cloudflared tunnel login
 cloudflared tunnel create climb
-cloudflared tunnel route dns climb climb.example.com
 ```
 
 `cloudflared` already created a `.cloudflared` folder in your home directory
@@ -161,6 +196,13 @@ users. In the Zero Trust dashboard: **Access → Applications → Add**, self-ho
 pointed at `climb.example.com`, with a policy allowing your own email address
 (and anyone you want to share it with). Cloudflare then demands a login before
 any request reaches the tunnel.
+
+Only after that Access application and its Allow policy are saved should the
+hostname be published:
+
+```bash
+cloudflared tunnel route dns climb climb.example.com
+```
 
 ## Two limits to know
 
@@ -200,6 +242,27 @@ does not start on its own unless you enabled "Start Docker Desktop when you
 log in" (see "Running the app," above). Without that setting, the container
 simply stays down after a reboot until you notice and open Docker Desktop by
 hand.
+
+Run these from the repository directory to control the local app:
+
+```bash
+docker compose stop                 # stop the app; keep its container and data
+docker compose start                # start it again without rebuilding
+docker compose restart              # restart the running container
+docker compose up -d --build        # build changes and leave it running
+docker compose down                 # remove the container; ./data still survives
+```
+
+For an interactive Quick Tunnel, **Ctrl+C** stops public access without stopping
+Docker. Restart it with `cloudflared tunnel --url http://localhost:8000` and
+share the newly generated URL. A permanent Windows tunnel installed as a
+service can instead be controlled from an elevated PowerShell:
+
+```powershell
+Stop-Service cloudflared
+Start-Service cloudflared
+Restart-Service cloudflared
+```
 
 To update:
 
