@@ -25,12 +25,21 @@ def create_pose_estimator(
     num_poses: int | None = None,
     settings: Settings = default_settings,
 ) -> PoseEstimator:
+    chosen = variant or settings.pose_model
+    count = num_poses if num_poses is not None else settings.max_people
+    if chosen == "vitpose":
+        # Optional experiment. Hugging Face owns these weights and its cache;
+        # MediaPipe's .task downloader does not apply to this backend.
+        from app.pose.vitpose_pose import VitPoseEstimator
+
+        return VitPoseEstimator(mode=mode, num_poses=count)
+
     from app.pose.mediapipe_pose import MediaPipePoseEstimator
 
     return MediaPipePoseEstimator(
-        ensure_model(variant or settings.pose_model, settings=settings),
+        ensure_model(chosen, settings=settings),
         mode=mode,
-        num_poses=num_poses if num_poses is not None else settings.max_people,
+        num_poses=count,
     )
 
 

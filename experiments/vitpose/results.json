@@ -1,0 +1,690 @@
+{
+  "date": "2026-09-07",
+  "base_commit": "ed0cd39508aa9d7e6b33c187409eebf4d442ffe3",
+  "source_filename": "video_20260902_190236~2.mp4",
+  "source_sha256": "207c844359ca261ca6acc844b1b87456281000949fde989cf759958afee5ad2c",
+  "normalized_sha256": "b9e4d2744176611fe738a873409073fcda3cf498a4cdac9701418b8091660c2c",
+  "video": {
+    "id": "9a26c23fe9a64eceb62600f6928a481d",
+    "original_filename": "video_20260902_190236~2.mp4",
+    "created_at": "2026-09-07T21:26:51.856967Z",
+    "status": "ready",
+    "ingest_error": null,
+    "width": 720,
+    "height": 1280,
+    "fps": 30,
+    "frame_count": 1033,
+    "duration_seconds": 34.43333333333333,
+    "size_bytes": 2490679,
+    "has_keypoints": true,
+    "has_footage": true,
+    "footage_expires_at": "2026-09-14T21:45:15.436605Z",
+    "source": {
+      "width": 1080,
+      "height": 1920,
+      "fps": 29.97002997002997,
+      "rotation": 0,
+      "codec": "vp9",
+      "variable_frame_rate": false
+    }
+  },
+  "runs": {
+    "heavy": {
+      "id": "8f0bcf24ff9045efb9870841d2d7384e",
+      "video_id": "9a26c23fe9a64eceb62600f6928a481d",
+      "created_at": "2026-09-07T21:48:49.032537Z",
+      "seed_frame_index": 240,
+      "selected_candidate_index": 0,
+      "seed_bounding_box": {
+        "x": 0.40838155150413513,
+        "y": 0.38063058257102966,
+        "width": 0.16054323315620422,
+        "height": 0.22988685965538025
+      },
+      "pose_configuration": {
+        "model": "heavy",
+        "max_people": 5
+      },
+      "tracking_configuration": {
+        "min_iou": 0.3,
+        "max_gap_frames": null
+      },
+      "result_available": true,
+      "keypoints_url": "/videos/9a26c23fe9a64eceb62600f6928a481d/keypoints?analysis_run_id=8f0bcf24ff9045efb9870841d2d7384e",
+      "execution": {
+        "job_id": "8af37f7cf1ea45a2b994b3f73e9ed83f",
+        "status": "done",
+        "progress": 1,
+        "started_at": "2026-09-07T21:48:49.054763Z",
+        "finished_at": "2026-09-07T21:51:28.241207Z",
+        "error": null
+      }
+    },
+    "vitpose": {
+      "id": "811d451c25fa4a08ab95041af940eedb",
+      "video_id": "9a26c23fe9a64eceb62600f6928a481d",
+      "created_at": "2026-09-07T21:27:35.303900Z",
+      "seed_frame_index": 240,
+      "selected_candidate_index": 0,
+      "seed_bounding_box": {
+        "x": 0.4056976318359375,
+        "y": 0.38723268508911135,
+        "width": 0.15473013983832468,
+        "height": 0.20396156311035152
+      },
+      "pose_configuration": {
+        "model": "vitpose",
+        "max_people": 5
+      },
+      "tracking_configuration": {
+        "min_iou": 0.3,
+        "max_gap_frames": null
+      },
+      "result_available": true,
+      "keypoints_url": "/videos/9a26c23fe9a64eceb62600f6928a481d/keypoints?analysis_run_id=811d451c25fa4a08ab95041af940eedb",
+      "execution": {
+        "job_id": "dfa9bb14619f4d2781a5bf93c2fbcceb",
+        "status": "done",
+        "progress": 1,
+        "started_at": "2026-09-07T21:27:35.320208Z",
+        "finished_at": "2026-09-07T21:45:15.437476Z",
+        "error": null
+      }
+    }
+  },
+  "shared_schema_replay": {
+    "method": {
+      "intervals": "start inclusive, end exclusive; never bridge gaps or interval boundaries",
+      "tracked_percent": "100 * non-null frames / interval frames; no visibility threshold",
+      "native_match_iou": "unchanged tracker score from shared-12-joint replay, before refinement",
+      "shared_box_iou": "consecutive available frames' clamped 12-joint bounding-box IoU; not a replayed tracker score",
+      "jitter": "median across selected joints of ||p[t+1] - 2*p[t] + p[t-1]||_2 / shared_body_height[t]; p in pixels",
+      "body_height": "max(y)-min(y) over all 12 shared joints in the centre frame, in pixels, without confidence filtering",
+      "percentiles": "linear interpolation over frame medians; no smoothing, fps-squared scaling or gap interpolation",
+      "paired": "same valid three-frame centers (and adjacent pairs) in every compared run; read alongside unpaired coverage",
+      "limitation": "coverage and temporal consistency are not joint accuracy; a confidently wrong or static pose can score well",
+      "precision": "API exports round x/y to 4 decimals and stored match IoU to 3 decimals"
+    },
+    "segments": [
+      {
+        "label": "left leg folds behind body (11.5-12.5s)",
+        "start_frame": 345,
+        "end_frame": 375,
+        "occluded_joints": [
+          "left_knee",
+          "left_ankle"
+        ],
+        "runs": {
+          "heavy": {
+            "tracked_frames": 27,
+            "frames": 30,
+            "tracked_percent": 90,
+            "match_iou": {
+              "samples": 27,
+              "median": 0.865,
+              "p90": 0.9366000000000001,
+              "p99": 0.95688
+            },
+            "shared_jitter": {
+              "samples": 23,
+              "median": 0.07153807230288346,
+              "p90": 0.11832581974002467,
+              "p99": 0.1419686834582906
+            },
+            "hidden_jitter": {
+              "samples": 23,
+              "median": 0.31268844495759207,
+              "p90": 0.704929492878526,
+              "p99": 1.303968689618182
+            },
+            "paired_shared_jitter": {
+              "samples": 23,
+              "median": 0.07153807230288346,
+              "p90": 0.11832581974002467,
+              "p99": 0.1419686834582906
+            },
+            "paired_hidden_jitter": {
+              "samples": 23,
+              "median": 0.31268844495759207,
+              "p90": 0.704929492878526,
+              "p99": 1.303968689618182
+            }
+          },
+          "vitpose": {
+            "tracked_frames": 30,
+            "frames": 30,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 30,
+              "median": 0.953,
+              "p90": 0.9855,
+              "p99": 0.991
+            },
+            "shared_jitter": {
+              "samples": 28,
+              "median": 0.015133558455763167,
+              "p90": 0.028727739039384716,
+              "p99": 0.03531513606932242
+            },
+            "hidden_jitter": {
+              "samples": 28,
+              "median": 0.15055680189940096,
+              "p90": 0.35108743952212595,
+              "p99": 0.4741232914038311
+            },
+            "paired_shared_jitter": {
+              "samples": 23,
+              "median": 0.016025487722317454,
+              "p90": 0.0291204187101877,
+              "p99": 0.03542509103139428
+            },
+            "paired_hidden_jitter": {
+              "samples": 23,
+              "median": 0.2068071530145769,
+              "p90": 0.388445656770864,
+              "p99": 0.4777972491699067
+            }
+          }
+        }
+      },
+      {
+        "label": "right arm hidden by upper body (16.0-18.5s)",
+        "start_frame": 480,
+        "end_frame": 555,
+        "occluded_joints": [
+          "right_elbow",
+          "right_wrist"
+        ],
+        "runs": {
+          "heavy": {
+            "tracked_frames": 75,
+            "frames": 75,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 75,
+              "median": 0.948,
+              "p90": 0.973,
+              "p99": 0.9803000000000001
+            },
+            "shared_jitter": {
+              "samples": 73,
+              "median": 0.019801894532436012,
+              "p90": 0.038909466821959005,
+              "p99": 0.04597532105453295
+            },
+            "hidden_jitter": {
+              "samples": 73,
+              "median": 0.040260921852281945,
+              "p90": 0.30065114166788,
+              "p99": 0.388549466943076
+            },
+            "paired_shared_jitter": {
+              "samples": 73,
+              "median": 0.019801894532436012,
+              "p90": 0.038909466821959005,
+              "p99": 0.04597532105453295
+            },
+            "paired_hidden_jitter": {
+              "samples": 73,
+              "median": 0.040260921852281945,
+              "p90": 0.30065114166788,
+              "p99": 0.388549466943076
+            }
+          },
+          "vitpose": {
+            "tracked_frames": 75,
+            "frames": 75,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 75,
+              "median": 0.98,
+              "p90": 0.994,
+              "p99": 0.99626
+            },
+            "shared_jitter": {
+              "samples": 73,
+              "median": 0.007815581369882484,
+              "p90": 0.016906104631768424,
+              "p99": 0.022012555295184737
+            },
+            "hidden_jitter": {
+              "samples": 73,
+              "median": 0.012642679279568962,
+              "p90": 0.041835705896124016,
+              "p99": 0.07158900979249389
+            },
+            "paired_shared_jitter": {
+              "samples": 73,
+              "median": 0.007815581369882484,
+              "p90": 0.016906104631768424,
+              "p99": 0.022012555295184737
+            },
+            "paired_hidden_jitter": {
+              "samples": 73,
+              "median": 0.012642679279568962,
+              "p90": 0.041835705896124016,
+              "p99": 0.07158900979249389
+            }
+          }
+        }
+      },
+      {
+        "label": "tucked posture hides right arm and leg (21.5-25.5s)",
+        "start_frame": 645,
+        "end_frame": 765,
+        "occluded_joints": [
+          "right_elbow",
+          "right_wrist",
+          "right_knee",
+          "right_ankle"
+        ],
+        "runs": {
+          "heavy": {
+            "tracked_frames": 119,
+            "frames": 120,
+            "tracked_percent": 99.16666666666667,
+            "match_iou": {
+              "samples": 119,
+              "median": 0.952,
+              "p90": 0.977,
+              "p99": 0.989
+            },
+            "shared_jitter": {
+              "samples": 115,
+              "median": 0.0373085768133119,
+              "p90": 0.05771026831229533,
+              "p99": 0.20671901685993654
+            },
+            "hidden_jitter": {
+              "samples": 115,
+              "median": 0.07747634786847674,
+              "p90": 0.14472773464912642,
+              "p99": 0.29382818172001546
+            },
+            "paired_shared_jitter": {
+              "samples": 115,
+              "median": 0.0373085768133119,
+              "p90": 0.05771026831229533,
+              "p99": 0.20671901685993654
+            },
+            "paired_hidden_jitter": {
+              "samples": 115,
+              "median": 0.07747634786847674,
+              "p90": 0.14472773464912642,
+              "p99": 0.29382818172001546
+            }
+          },
+          "vitpose": {
+            "tracked_frames": 120,
+            "frames": 120,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 120,
+              "median": 0.972,
+              "p90": 0.9901,
+              "p99": 0.995
+            },
+            "shared_jitter": {
+              "samples": 118,
+              "median": 0.010009768394893079,
+              "p90": 0.020737919447345318,
+              "p99": 0.035161115785877294
+            },
+            "hidden_jitter": {
+              "samples": 118,
+              "median": 0.026500007167515324,
+              "p90": 0.08553630118211553,
+              "p99": 0.2465401987925123
+            },
+            "paired_shared_jitter": {
+              "samples": 115,
+              "median": 0.009941728935359034,
+              "p90": 0.021421396093350434,
+              "p99": 0.035241322007793514
+            },
+            "paired_hidden_jitter": {
+              "samples": 115,
+              "median": 0.026237228684627016,
+              "p90": 0.08684802330299629,
+              "p99": 0.24674703246792667
+            }
+          }
+        }
+      }
+    ]
+  },
+  "native_refined": {
+    "method": {
+      "intervals": "start inclusive, end exclusive; never bridge gaps or interval boundaries",
+      "tracked_percent": "100 * non-null frames / interval frames; no visibility threshold",
+      "native_match_iou": "stored tracker score, based on each model's full schema before refinement; not schema-equivalent",
+      "shared_box_iou": "consecutive available frames' clamped 12-joint bounding-box IoU; not a replayed tracker score",
+      "jitter": "median across selected joints of ||p[t+1] - 2*p[t] + p[t-1]||_2 / shared_body_height[t]; p in pixels",
+      "body_height": "max(y)-min(y) over all 12 shared joints in the centre frame, in pixels, without confidence filtering",
+      "percentiles": "linear interpolation over frame medians; no smoothing, fps-squared scaling or gap interpolation",
+      "paired": "same valid three-frame centers (and adjacent pairs) in every compared run; read alongside unpaired coverage",
+      "limitation": "coverage and temporal consistency are not joint accuracy; a confidently wrong or static pose can score well",
+      "precision": "API exports round x/y to 4 decimals and stored match IoU to 3 decimals"
+    },
+    "segments": [
+      {
+        "label": "left leg folds behind body (11.5-12.5s)",
+        "start_frame": 345,
+        "end_frame": 375,
+        "occluded_joints": [
+          "left_knee",
+          "left_ankle"
+        ],
+        "runs": {
+          "heavy": {
+            "tracked_frames": 27,
+            "frames": 30,
+            "tracked_percent": 90,
+            "match_iou": {
+              "samples": 27,
+              "median": 0.845,
+              "p90": 0.9214,
+              "p99": 0.95334
+            },
+            "shared_jitter": {
+              "samples": 23,
+              "median": 0.029213940217566653,
+              "p90": 0.049133157857352054,
+              "p99": 0.06120704225864597
+            },
+            "hidden_jitter": {
+              "samples": 23,
+              "median": 0.1188309060860041,
+              "p90": 0.41675171836641256,
+              "p99": 0.5988529754085673
+            },
+            "paired_shared_jitter": {
+              "samples": 23,
+              "median": 0.029213940217566653,
+              "p90": 0.049133157857352054,
+              "p99": 0.06120704225864597
+            },
+            "paired_hidden_jitter": {
+              "samples": 23,
+              "median": 0.1188309060860041,
+              "p90": 0.41675171836641256,
+              "p99": 0.5988529754085673
+            }
+          },
+          "vitpose": {
+            "tracked_frames": 30,
+            "frames": 30,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 30,
+              "median": 0.953,
+              "p90": 0.9855,
+              "p99": 0.991
+            },
+            "shared_jitter": {
+              "samples": 28,
+              "median": 0.024115317157924906,
+              "p90": 0.03397375836015861,
+              "p99": 0.056587635161351305
+            },
+            "hidden_jitter": {
+              "samples": 28,
+              "median": 0.08988312410957856,
+              "p90": 0.4598032445754126,
+              "p99": 0.8215967261544515
+            },
+            "paired_shared_jitter": {
+              "samples": 23,
+              "median": 0.025676984272826255,
+              "p90": 0.03666639836011293,
+              "p99": 0.0568330305510424
+            },
+            "paired_hidden_jitter": {
+              "samples": 23,
+              "median": 0.08282551980792613,
+              "p90": 0.5552966844447171,
+              "p99": 0.8259517674829737
+            }
+          }
+        }
+      },
+      {
+        "label": "right arm hidden by upper body (16.0-18.5s)",
+        "start_frame": 480,
+        "end_frame": 555,
+        "occluded_joints": [
+          "right_elbow",
+          "right_wrist"
+        ],
+        "runs": {
+          "heavy": {
+            "tracked_frames": 75,
+            "frames": 75,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 75,
+              "median": 0.951,
+              "p90": 0.9778,
+              "p99": 0.98552
+            },
+            "shared_jitter": {
+              "samples": 73,
+              "median": 0.014285125682560677,
+              "p90": 0.02339345032579071,
+              "p99": 0.0337995828995776
+            },
+            "hidden_jitter": {
+              "samples": 73,
+              "median": 0.05025909033403403,
+              "p90": 0.24334148405069195,
+              "p99": 0.4096017457202396
+            },
+            "paired_shared_jitter": {
+              "samples": 73,
+              "median": 0.014285125682560677,
+              "p90": 0.02339345032579071,
+              "p99": 0.0337995828995776
+            },
+            "paired_hidden_jitter": {
+              "samples": 73,
+              "median": 0.05025909033403403,
+              "p90": 0.24334148405069195,
+              "p99": 0.4096017457202396
+            }
+          },
+          "vitpose": {
+            "tracked_frames": 75,
+            "frames": 75,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 75,
+              "median": 0.98,
+              "p90": 0.994,
+              "p99": 0.99626
+            },
+            "shared_jitter": {
+              "samples": 73,
+              "median": 0.009282987876846588,
+              "p90": 0.01857878270302589,
+              "p99": 0.02667676166184632
+            },
+            "hidden_jitter": {
+              "samples": 73,
+              "median": 0.016845395485028947,
+              "p90": 0.054389840814653936,
+              "p99": 0.10483259150931308
+            },
+            "paired_shared_jitter": {
+              "samples": 73,
+              "median": 0.009282987876846588,
+              "p90": 0.01857878270302589,
+              "p99": 0.02667676166184632
+            },
+            "paired_hidden_jitter": {
+              "samples": 73,
+              "median": 0.016845395485028947,
+              "p90": 0.054389840814653936,
+              "p99": 0.10483259150931308
+            }
+          }
+        }
+      },
+      {
+        "label": "tucked posture hides right arm and leg (21.5-25.5s)",
+        "start_frame": 645,
+        "end_frame": 765,
+        "occluded_joints": [
+          "right_elbow",
+          "right_wrist",
+          "right_knee",
+          "right_ankle"
+        ],
+        "runs": {
+          "heavy": {
+            "tracked_frames": 119,
+            "frames": 120,
+            "tracked_percent": 99.16666666666667,
+            "match_iou": {
+              "samples": 119,
+              "median": 0.959,
+              "p90": 0.985,
+              "p99": 0.991
+            },
+            "shared_jitter": {
+              "samples": 115,
+              "median": 0.027785680033569824,
+              "p90": 0.053243967169124384,
+              "p99": 0.16151856007140503
+            },
+            "hidden_jitter": {
+              "samples": 115,
+              "median": 0.054580106325071404,
+              "p90": 0.14120587565758386,
+              "p99": 0.19818123993837772
+            },
+            "paired_shared_jitter": {
+              "samples": 115,
+              "median": 0.027785680033569824,
+              "p90": 0.053243967169124384,
+              "p99": 0.16151856007140503
+            },
+            "paired_hidden_jitter": {
+              "samples": 115,
+              "median": 0.054580106325071404,
+              "p90": 0.14120587565758386,
+              "p99": 0.19818123993837772
+            }
+          },
+          "vitpose": {
+            "tracked_frames": 120,
+            "frames": 120,
+            "tracked_percent": 100,
+            "match_iou": {
+              "samples": 120,
+              "median": 0.974,
+              "p90": 0.9881,
+              "p99": 0.996
+            },
+            "shared_jitter": {
+              "samples": 118,
+              "median": 0.01331966488367564,
+              "p90": 0.028871154819339866,
+              "p99": 0.04423100329618255
+            },
+            "hidden_jitter": {
+              "samples": 118,
+              "median": 0.03507075770858081,
+              "p90": 0.1000995443170301,
+              "p99": 0.24699196940678966
+            },
+            "paired_shared_jitter": {
+              "samples": 115,
+              "median": 0.013271317558228843,
+              "p90": 0.02892403338436129,
+              "p99": 0.0444667549681583
+            },
+            "paired_hidden_jitter": {
+              "samples": 115,
+              "median": 0.0345332359219786,
+              "p90": 0.10054364832458511,
+              "p99": 0.2472845159676674
+            }
+          }
+        }
+      }
+    ]
+  },
+  "recording_manifest": [
+    {
+      "file": "heavy-1788817704174153415.jsonl.gz",
+      "model": "heavy",
+      "mode": "image",
+      "frames": 1,
+      "full_pass": false,
+      "load_seconds": 1.1570889630020247,
+      "inference_seconds": 0.06318342799931997,
+      "multi_person_frames": 0
+    },
+    {
+      "file": "heavy-1788817705162220586.jsonl.gz",
+      "model": "heavy",
+      "mode": "image",
+      "frames": 1,
+      "full_pass": false,
+      "load_seconds": 0.09852481800044188,
+      "inference_seconds": 0.06344623699988006,
+      "multi_person_frames": 0
+    },
+    {
+      "file": "heavy-1788817729154243264.jsonl.gz",
+      "model": "heavy",
+      "mode": "video",
+      "frames": 1033,
+      "full_pass": true,
+      "load_seconds": 0.0985147249957663,
+      "inference_seconds": 80.4592205309309,
+      "multi_person_frames": 88
+    },
+    {
+      "file": "heavy-1788817818271623541.jsonl.gz",
+      "model": "heavy",
+      "mode": "video",
+      "frames": 812,
+      "full_pass": false,
+      "load_seconds": 0.12093674000061583,
+      "inference_seconds": 57.55744452492945,
+      "multi_person_frames": 22
+    },
+    {
+      "file": "vitpose-1788816427064680199.jsonl.gz",
+      "model": "vitpose",
+      "mode": "image",
+      "frames": 1,
+      "full_pass": false,
+      "load_seconds": 3.398687619002885,
+      "inference_seconds": 2.0133824399963487,
+      "multi_person_frames": 0
+    },
+    {
+      "file": "vitpose-1788816456157284209.jsonl.gz",
+      "model": "vitpose",
+      "mode": "video",
+      "frames": 1033,
+      "full_pass": true,
+      "load_seconds": 0.8385473029993591,
+      "inference_seconds": 546.6377642809239,
+      "multi_person_frames": 126
+    },
+    {
+      "file": "vitpose-1788817011664075093.jsonl.gz",
+      "model": "vitpose",
+      "mode": "video",
+      "frames": 876,
+      "full_pass": false,
+      "load_seconds": 0.7608380840028985,
+      "inference_seconds": 492.41254733587994,
+      "multi_person_frames": 316
+    }
+  ],
+  "limitation": "Temporal consistency and coverage are not ground-truth pose or identity accuracy. Native matching uses full schemas; shared replay uses only 12 common joints with identical seed/config."
+}

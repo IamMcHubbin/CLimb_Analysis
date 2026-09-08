@@ -1,0 +1,6 @@
+# Optional experiment only; the normal app/Docker dependencies are unchanged.
+# Install CPU wheels first, see docs/VITPOSE_EXPERIMENT.md.
+torch==2.7.1
+torchvision==0.22.1
+transformers==4.57.6
+scipy==1.15.3

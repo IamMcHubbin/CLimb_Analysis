@@ -1,0 +1,20 @@
+[
+  {
+    "label": "left leg folds behind body (11.5-12.5s)",
+    "start_frame": 345,
+    "end_frame": 375,
+    "occluded_joints": ["left_knee", "left_ankle"]
+  },
+  {
+    "label": "right arm hidden by upper body (16.0-18.5s)",
+    "start_frame": 480,
+    "end_frame": 555,
+    "occluded_joints": ["right_elbow", "right_wrist"]
+  },
+  {
+    "label": "tucked posture hides right arm and leg (21.5-25.5s)",
+    "start_frame": 645,
+    "end_frame": 765,
+    "occluded_joints": ["right_elbow", "right_wrist", "right_knee", "right_ankle"]
+  }
+]

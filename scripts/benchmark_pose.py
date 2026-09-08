@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import statistics
 import sys
 import tempfile
@@ -67,12 +69,13 @@ class BenchmarkResult:
     # one; ``repeat_p50_ms`` shows every repeat so the noise floor is visible.
     repeats: int = 1
     repeat_p50_ms: tuple[float, ...] = ()
+    start_frame: int = 0
 
     def summary_lines(self) -> list[str]:
         return [
             f"model                {self.model} (num_poses={self.num_poses})",
             f"clip                 {self.width}x{self.height}, {self.frames} frames, "
-            f"{self.clip_seconds:.1f}s @ {self.clip_fps:g}fps",
+            f"{self.clip_seconds:.1f}s @ {self.clip_fps:g}fps (from frame {self.start_frame})",
             f"wall time            {self.wall_total_s:.1f}s "
             f"(decode {self.decode_total_s:.1f}s, inference {self.inference_total_s:.1f}s)",
             f"inference per frame  mean {self.inference_ms_mean:.1f}ms | "
@@ -118,7 +121,10 @@ def benchmark(
     max_frames: int | None,
     mode: RunningMode,
     warmup_frames: int,
+    start_frame: int = 0,
 ) -> BenchmarkResult:
+    if start_frame < 0 or warmup_frames < 0 or (max_frames is not None and max_frames <= 0):
+        raise ValueError("start/warmup frames must be nonnegative and max_frames positive")
     probe = probe_video(video_path)
     _prefetch(video_path)
     capture = cv2.VideoCapture(str(video_path))
@@ -140,14 +146,15 @@ def benchmark(
         # discarded. Timestamps keep climbing across the reset: in VIDEO mode
         # the estimator rejects a timestamp that does not advance, and clamping
         # it would change the tracking behaviour being measured.
-        timestamp_frame = 0
+        capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        timestamp_frame = start_frame
         for _ in range(warmup_frames):
             ok, frame = capture.read()
             if not ok:
                 break
             estimator.detect(frame, int(round(1000 * timestamp_frame / fps)))
             timestamp_frame += 1
-        capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         wall_start = time.perf_counter()
         while max_frames is None or frames < max_frames:
@@ -200,6 +207,7 @@ def benchmark(
         frames_with_detection=frames_with_detection,
         detection_rate=frames_with_detection / frames,
         mean_people_per_frame=total_people / frames,
+        start_frame=start_frame,
     )
 
 
@@ -227,9 +235,13 @@ def benchmark_repeated(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--video", type=Path, required=True)
-    parser.add_argument("--models", default="lite", help="comma separated: lite,full,heavy")
+    parser.add_argument("--models", default="lite", help="comma separated: lite,full,heavy,vitpose (optional dependencies)")
     parser.add_argument("--num-poses", type=int, default=settings.max_people)
     parser.add_argument("--max-frames", type=int, default=None, help="stop after N frames")
+    parser.add_argument("--start-frame", type=int, default=0,
+                        help="first frame of the measured window (also used for warmup)")
+    parser.add_argument("--torch-threads", type=int, default=None,
+                        help="explicit CPU thread count for PyTorch models; leaves MediaPipe unchanged")
     parser.add_argument("--repeats", type=int, default=3,
                         help="measurement passes per model; the fastest is reported")
     parser.add_argument("--warmup-frames", type=int, default=30,
@@ -242,6 +254,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.video.exists():
         raise SystemExit(f"no such file: {args.video}")
+    environment = {"platform": platform.platform(), "processor": platform.processor(),
+                   "logical_cpus": os.cpu_count(), "python": platform.python_version(),
+                   "opencv": cv2.__version__, "mode": args.mode,
+                   "warmup_frames": args.warmup_frames,
+                   "omp_num_threads": os.environ.get("OMP_NUM_THREADS"),
+                   "mkl_num_threads": os.environ.get("MKL_NUM_THREADS"),
+                   "torch_threads": None}
+    if args.torch_threads is not None:
+        if args.torch_threads <= 0:
+            parser.error("--torch-threads must be positive")
+        import torch
+
+        torch.set_num_threads(args.torch_threads)
+        environment.update(torch=torch.__version__, torch_threads=torch.get_num_threads())
+    print("environment          " + json.dumps(environment))
 
     with tempfile.TemporaryDirectory() as tmp:
         video_path = args.video
@@ -268,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_frames=args.max_frames,
                 mode=RunningMode(args.mode),
                 warmup_frames=args.warmup_frames,
+                start_frame=args.start_frame,
             )
             results.append(result)
             print("\n".join(result.summary_lines()))
@@ -277,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "video": str(args.video),
             "normalise_seconds": normalise_seconds,
+            "environment": environment,
             "results": [asdict(result) for result in results],
         }
         args.json.write_text(json.dumps(payload, indent=2))

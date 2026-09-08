@@ -377,6 +377,10 @@ raw behaviour had been seen.
 
 ## What this still needs
 
+An opt-in [ViTPose experiment](docs/VITPOSE_EXPERIMENT.md) adds a 17-joint,
+multi-person alternative for measured CPU/occlusion comparisons. It does not
+change either MediaPipe default or the production image dependencies.
+
 **Thresholds are still guesses.** `TrackingConfig.min_iou` is 0.3 and gaps
 never expire, so the tracker keeps trying to re-acquire indefinitely. One clip
 is not enough to tune that. Footage with two climbers on the same wall is the
