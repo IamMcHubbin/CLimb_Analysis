@@ -253,6 +253,20 @@ docker compose up -d --build        # build changes and leave it running
 docker compose down                 # remove the container; ./data still survives
 ```
 
+On Windows, the included `climb-server.bat` wraps the everyday commands:
+
+```bat
+climb-server.bat start
+climb-server.bat stop
+climb-server.bat restart
+climb-server.bat status
+```
+
+`start` builds any changed image and starts the app; `stop` preserves both the
+container and `./data`. The batch file controls the local Docker app only. If a
+Quick Tunnel is running in another window, press **Ctrl+C** there separately to
+make its public URL stop working.
+
 For an interactive Quick Tunnel, **Ctrl+C** stops public access without stopping
 Docker. Restart it with `cloudflared tunnel --url http://localhost:8000` and
 share the newly generated URL. A permanent Windows tunnel installed as a

@@ -123,6 +123,10 @@
   .stage { position: relative; line-height: 0; border-radius: 8px; overflow: hidden; }
   .stage video { width: 100%; background: #000; display: block; }
   .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .playback-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .playback-pane { min-width: 0; }
+  .playback-title { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .skeleton-stage { background: #0b1018; }
 
   .hud {
     display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 12px;
@@ -195,6 +199,12 @@
 
   <section id="s-pick" hidden>
     <h2><span class="step">2</span> Which one is the climber?</h2>
+    <div class="row run-picker">
+      <label for="pose-model">Pose model</label>
+      <select id="pose-model" aria-describedby="model-hint" disabled></select>
+      <button id="detect-people" disabled>Detect people</button>
+    </div>
+    <p class="note" id="model-hint">Choose a model before computing. Analysis jobs run one at a time.</p>
     <div class="frame-wrap" id="frame-wrap"><img id="cand-frame" alt="A frame from the clip"></div>
     <div class="status" id="pick-status"></div>
     <div class="row" style="margin-top:12px">
@@ -218,9 +228,20 @@
       <span class="status" id="run-status"></span>
     </div>
 
-    <div class="stage" id="stage">
-      <video id="player" controls playsinline preload="metadata"></video>
-      <canvas id="overlay"></canvas>
+    <div class="playback-grid" id="stage">
+      <div class="playback-pane">
+        <div class="playback-title">Video + overlay</div>
+        <div class="stage">
+          <video id="player" controls playsinline preload="metadata"></video>
+          <canvas id="overlay" aria-label="Skeleton over video"></canvas>
+        </div>
+      </div>
+      <div class="playback-pane">
+        <div class="playback-title">Skeleton only</div>
+        <div class="stage skeleton-stage" id="skeleton-stage">
+          <canvas id="skeleton-only" aria-label="Synchronized skeleton without video"></canvas>
+        </div>
+      </div>
     </div>
 
     <div class="status" id="no-footage" hidden></div>
@@ -263,7 +284,7 @@
     <table class="meta" id="meta"></table>
 
     <div class="row" style="margin-top:16px">
-      <button class="ghost" id="repick">Track someone else</button>
+      <button class="ghost" id="repick">New analysis / change model</button>
       <button class="danger" id="delete-footage">Delete footage now</button>
     </div>
     <p class="note" id="retention-note"></p>

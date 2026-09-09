@@ -30,6 +30,8 @@ def _encode_candidates(candidates: CandidateSet) -> str:
     return json.dumps(
         {
             "frame_index": candidates.frame_index,
+            "pose_model": candidates.pose_model,
+            "selection_id": candidates.selection_id,
             "candidates": [
                 {
                     "index": candidate.index,
@@ -49,6 +51,8 @@ def _decode_candidates(payload: str) -> CandidateSet:
     data = json.loads(payload)
     return CandidateSet(
         frame_index=int(data["frame_index"]),
+        pose_model=data.get("pose_model"),
+        selection_id=data.get("selection_id"),
         candidates=tuple(
             Candidate(
                 index=int(entry["index"]),

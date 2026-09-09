@@ -15,6 +15,7 @@ tried, spread across the clip, and the first that finds anyone wins.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -53,9 +54,12 @@ class CandidateService:
         # IMAGE mode: one frame, no temporal state to carry.
         return create_pose_estimator(mode=RunningMode.IMAGE, settings=self._settings)
 
-    def frame_path(self, video: VideoRecord) -> Path:
+    def frame_path(self, video: VideoRecord, candidates: CandidateSet | None = None) -> Path:
         """Where the rendered candidate frame is cached."""
-        return self._settings.resolve(video.stored_path).parent / CANDIDATE_FRAME_FILENAME
+        candidates = candidates or self._repository.get_candidates(video.id)
+        filename = (f'candidate_{candidates.selection_id}.jpg'
+                    if candidates and candidates.selection_id else CANDIDATE_FRAME_FILENAME)
+        return self._settings.resolve(video.stored_path).parent / filename
 
     def default_frame_index(self, video: VideoRecord) -> int:
         return max(0, video.frame_count // 2)
@@ -78,7 +82,8 @@ class CandidateService:
         would also renumber the candidates underneath a user who is mid-choice.
         """
         existing = self._repository.get_candidates(video.id)
-        if existing is not None and self.frame_path(video).exists():
+        if (existing is not None and existing.pose_model == self._settings.pose_model
+                and self.frame_path(video, existing).exists()):
             # A stored set for any frame satisfies an unspecified request; only
             # an explicit ask for a different frame forces a new detection.
             if frame_index is None or existing.frame_index == frame_index:
@@ -130,6 +135,8 @@ class CandidateService:
         ordered = sorted(people, key=lambda person: person.bounding_box.area, reverse=True)
         candidate_set = CandidateSet(
             frame_index=wanted,
+            pose_model=self._settings.pose_model,
+            selection_id=uuid.uuid4().hex,
             candidates=tuple(
                 Candidate(
                     index=position,
@@ -140,7 +147,7 @@ class CandidateService:
             ),
         )
 
-        destination = self.frame_path(video)
+        destination = self.frame_path(video, candidate_set)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(encode_jpeg(frame))
 

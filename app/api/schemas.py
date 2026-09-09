@@ -100,6 +100,8 @@ class CandidateOut(BaseModel):
 
 
 class CandidatesOut(BaseModel):
+    pose_model: str | None = None
+    selection_id: str | None = None
     frame_index: int
     timestamp_seconds: float
     frame_url: str
@@ -111,6 +113,8 @@ class CandidatesOut(BaseModel):
     def from_set(cls, video: VideoRecord, candidate_set: CandidateSet) -> "CandidatesOut":
         return cls(
             frame_index=candidate_set.frame_index,
+            pose_model=candidate_set.pose_model,
+            selection_id=candidate_set.selection_id,
             timestamp_seconds=candidate_set.frame_index / video.fps if video.fps else 0.0,
             # A URL rather than an inlined image: the browser can render it
             # with <img> and cache it, and the JSON stays small.
@@ -137,6 +141,8 @@ class AnalyseRequest(BaseModel):
     """Which of the detected people to follow."""
 
     candidate_index: int
+    pose_model: str | None = None
+    selection_id: str | None = None
 
 
 class JobOut(BaseModel):

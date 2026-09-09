@@ -182,6 +182,8 @@ class CandidateSet:
 
     frame_index: int
     candidates: tuple[Candidate, ...]
+    pose_model: str | None = None
+    selection_id: str | None = None
 
     def get(self, index: int) -> Candidate | None:
         for candidate in self.candidates:

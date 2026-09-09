@@ -32,11 +32,16 @@ from app.db.repository import (
 from app.tracking import TrackingConfig
 from app.config import Settings, settings as default_settings
 from app.jobs.base import JobQueue
+from app.pose.catalog import validate_model
 
 logger = logging.getLogger(__name__)
 
 
 class UnknownCandidate(ValueError):
+    pass
+
+
+class StaleSelection(ValueError):
     pass
 
 
@@ -77,11 +82,20 @@ class JobService:
         logger.info("queued ingest job %s for video %s", job.id, video_id)
         return job
 
-    def submit(self, video_id: str, candidate_index: int) -> JobRecord:
+    def submit(self, video_id: str, candidate_index: int, *, pose_model: str | None = None,
+               selection_id: str | None = None) -> JobRecord:
         """Queue an analysis of one candidate. Returns immediately."""
         candidates = self._videos.get_candidates(video_id)
         if candidates is None:
             raise UnknownCandidate("no candidates for this video; call /candidates first")
+        chosen_model = validate_model(pose_model or self._settings.pose_model)
+        # Explicit-model clients must bind to the exact picker response. Older
+        # index-only clients retain default-model behavior, never cross-model reuse.
+        if (pose_model is not None and selection_id is None
+                or selection_id is not None and selection_id != candidates.selection_id
+                or candidates.pose_model is not None and candidates.pose_model != chosen_model
+                or pose_model is not None and candidates.pose_model is None):
+            raise StaleSelection('candidate selection changed or belongs to another model; detect and select again')
         candidate = candidates.get(candidate_index)
         if candidate is None:
             available = [entry.index for entry in candidates.candidates]
@@ -102,7 +116,7 @@ class JobService:
                 seed_box=candidate.bounding_box,
                 min_iou=self._tracking_config.min_iou,
                 max_gap_frames=self._tracking_config.max_gap_frames,
-                pose_model=self._settings.pose_model,
+                pose_model=chosen_model,
                 max_people=self._settings.max_people,
                 refine_landmarks=self._settings.refine_landmarks,
                 refine_margin=self._settings.refine_margin,

@@ -2,8 +2,9 @@
 
 This is an opt-in CPU experiment, not the default estimator or a deployment
 recommendation. See [the measured experiment](../experiments/vitpose/README.md).
-Production requirements, Docker configuration, tracking, refinement, storage,
-API and frontend are unchanged.
+Tracking and refinement remain unchanged. The app now supports per-run model
+selection and synchronized video/skeleton-only panels. Default dependencies
+remain MediaPipe-only; ViTPose installation is optional.
 
 ## Backend and limits
 
@@ -51,19 +52,20 @@ python -m pip install -r requirements-vitpose.txt
 python scripts/serve_pose_experiment.py --model vitpose --data-dir data/vitpose-experiment --records-dir data/vitpose-recordings --port 8001
 ```
 
-Open http://localhost:8001, upload the clip, select the climber and analyse.
+Open http://localhost:8001, upload the clip, choose the model, click **Detect
+people**, select the climber and analyse. Opening the picker or changing its
+model does not run inference until **Detect people** is pressed.
 The default server on port 8000 need not be stopped. **Use a separate data
 directory**: this wrapper changes the selected model only for this process
 and records detections for comparison. Ctrl+C stops it; the same command
 restarts it with the existing experiment data. It starts no public tunnel.
 Allow several minutes for the first model download and CPU analysis.
 
-To compare MediaPipe, stop the experimental server, restart the command with
-`--model heavy` and the same experiment data directory, and analyse the same
-video again. Candidate caches are currently model-blind: request a different
-seed frame, then the intended seed frame again, to force a fresh detection
-after switching models. Do not assume a cached candidate belongs to the new
-backend. The run's captured seed still remains immutable once submitted.
+To compare MediaPipe, choose **New analysis / change model** and select Heavy
+in the same server. No restart or separate data directory is required per
+model. Each run retains its own model, seed and artifact; the run selector
+reopens completed results. The existing queue runs jobs one at a time.
+Candidate caches are model-aware, and stale selection IDs are rejected.
 
 For shell-based configuration without the recording wrapper:
 
@@ -75,8 +77,20 @@ For shell-based configuration without the recording wrapper:
 | `$env:MKL_NUM_THREADS = '4'` | `export MKL_NUM_THREADS=4` |
 
 Then `python -m uvicorn app.main:app --host 127.0.0.1 --port 8001` in either
-shell. The Docker image does not install these optional dependencies; do not
-change the production compose default just to run this experiment.
+shell. An ordinary Docker image leaves ViTPose visible but disabled in the
+selector, with an installation explanation. To enable it, these commands work
+in PowerShell and Linux/macOS (from the repository root):
+
+```text
+docker compose build --build-arg INSTALL_VITPOSE=true app
+docker compose up -d --no-build
+```
+
+This installs CPU dependencies but leaves Heavy as the compose default.
+First ViTPose use downloads the pinned checkpoints through Hugging Face.
+The weight cache must be persisted separately if it should survive container
+replacement. Rebuilding without the build argument returns to a MediaPipe-only
+image; completed ViTPose runs remain viewable without its runtime installed.
 
 ## Reproduce measurements
 
@@ -137,6 +151,7 @@ AnalysisRun records the backend variant and existing configurations, but not
 the separate detector/checkpoint revisions, dependencies, CPU threads or clip
 hash. The experiment report and pinned constants supply those separately;
 changing the provenance schema is out of scope. Candidate caches are not
-keyed by model. Confidence and depth semantics need a richer contract before
+keyed by model in the original measurement; current candidate sets include
+model and selection identity. Confidence and depth semantics need a richer contract before
 cross-model metrics could rely on them. Those are follow-up issues, not reasons
 to alter tracking, storage or the API in this experiment.

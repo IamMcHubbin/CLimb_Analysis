@@ -304,7 +304,7 @@ queue.
 | `CLIMB_RETAIN_ANALYSED_SECONDS` | `3600` | Keep footage this long after analysis |
 | `CLIMB_RETAIN_UNANALYSED_SECONDS` | `86400` | Keep never-analysed uploads this long |
 | `CLIMB_RETENTION_SWEEP_SECONDS` | `60` | How often the janitor looks |
-| `CLIMB_POSE_MODEL` | `lite` | `lite`, `full` or `heavy` |
+| `CLIMB_POSE_MODEL` | `lite` | Default: `lite`, `full`, `heavy`, or `vitpose` with optional dependencies installed |
 | `CLIMB_MAX_PEOPLE` | `5` | Maximum people detected per frame |
 | `CLIMB_REFINE_LANDMARKS` | `1` | Second pose pass on a crop around the tracked person |
 | `CLIMB_REFINE_MARGIN` | `0.55` | How much context to leave around that crop |
@@ -379,7 +379,35 @@ raw behaviour had been seen.
 
 An opt-in [ViTPose experiment](docs/VITPOSE_EXPERIMENT.md) adds a 17-joint,
 multi-person alternative for measured CPU/occlusion comparisons. It does not
-change either MediaPipe default or the production image dependencies.
+change either MediaPipe default. Optional Docker dependencies can be enabled
+with `docker compose build --build-arg INSTALL_VITPOSE=true app`.
+
+### Comparing models in the app
+
+Choose **Pose model** before clicking **Detect people**, then pick the climber
+and analyse. Use **New analysis / change model** to repeat on the same upload;
+completed runs can be reopened using **Analysis run**. Heavy remains the
+compose default; models unavailable on the server are disabled with an
+installation hint. Jobs with different models can coexist in the queue but
+are computed one at a time. Merely opening/changing the selector does not
+compute a pose.
+
+Playback keeps the video on the **left** and a skeleton-only panel on the
+**right**, including narrow screens: both shrink rather than stack. Both use
+the same frame, smoothing toggle and skeleton edges. Gaps clear both panels;
+there is no interpolated pose or second playback clock.
+
+API additions are optional: `/config` advertises `pose_models` and
+`default_pose_model`; `GET /videos/{id}/candidates?pose_model=heavy` returns
+`pose_model` and `selection_id`. Submit those with `candidate_index` to
+`POST /videos/{id}/analyse`. Explicit model requests must provide the exact
+selection ID; replaced or cross-model selections return 409, unknown models
+422, and uninstalled optional backends 503. Image requests can also supply
+`selection_id` to avoid showing a replaced picker frame. Legacy index-only
+requests retain configured-default behavior (but never reuse another model's
+selection). Existing candidate JSON decodes without a database migration;
+model-blind caches are refreshed on detection. Candidate JPEG generations
+are retained within the video's directory until its normal footage cleanup.
 
 **Thresholds are still guesses.** `TrackingConfig.min_iou` is 0.3 and gaps
 never expire, so the tracker keeps trying to re-acquire indefinitely. One clip
@@ -387,14 +415,16 @@ is not enough to tune that. Footage with two climbers on the same wall is the
 next useful input, since that is the case where re-acquiring the wrong person
 is actually possible.
 
-**Runs are recorded but not browsable.** Every analysis writes an immutable
-run, and the API can serve any of them, but the front end only ever shows the
-newest. Listing them is the obvious next piece of UI.
+**Runs are browsable.** Every analysis writes an immutable run. The result
+selector reopens previous runs, including runs made with different models;
+the latest completed run remains the default. Side-by-side run comparison
+is not implemented: the second playback pane shows the selected run's skeleton.
 
 Known rough edges:
 
-- The schema has no migrations. Changing a model means deleting
-  `data/climb.db`; the data is disposable at this stage.
+- There is no general migration framework. Switching pose models needs no
+  database reset; candidate model/generation metadata uses the existing JSON
+  field, and immutable runs already store their own pose configuration.
 - Analysis buffers the detections before the seed frame in memory, which is
   what limits practical clip length. Fine for a few minutes.
 - Uploads and analysis are unauthenticated and unbounded per user.

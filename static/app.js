@@ -21,6 +21,8 @@ const state = {
   video: null,       // the video record being worked on
   candidates: null,
   selected: null,
+  candidateRequest: 0,
+  frameReady: false,
   keypoints: null,
   analysisRuns: [],
   selectedRunId: null,
@@ -63,6 +65,19 @@ function formatDuration(seconds) {
 
 async function loadConfig() {
   state.config = await api('/config');
+  const models = $('pose-model');
+  models.replaceChildren();
+  for (const model of state.config.pose_models) {
+    const option = document.createElement('option');
+    option.value = model.id;
+    option.textContent = model.label + (model.available ? '' : ' — not installed');
+    option.disabled = !model.available;
+    option.title = model.unavailable_reason || '';
+    models.appendChild(option);
+  }
+  models.value = state.config.default_pose_model;
+  models.disabled = false;
+  updateModelHint();
   $('drop-hint').textContent =
     `MP4, MOV or similar, up to ${formatBytes(state.config.max_upload_bytes)}. ` +
     `Normalised to ${state.config.target_fps}fps, long edge ${state.config.max_long_edge}px.`;
@@ -222,6 +237,7 @@ async function refreshLibrary() {
 // --------------------------------------------------------- opening a video
 
 async function openVideo(video) {
+  clearCandidateSelection();
   state.video = video;
   state.keypoints = null;
   state.analysisRuns = [];
@@ -247,29 +263,83 @@ async function openVideo(video) {
       'That clip was never analysed and its footage has been deleted.', true);
     return;
   }
-  await loadCandidates();
+  prepareCandidates();
 }
 
 // --------------------------------------------------------------- candidates
 
-async function loadCandidates(frameIndex) {
-  show('s-pick', true);
-  setStatus('pick-status', 'Detecting people…');
-  const query = frameIndex === undefined ? '' : `?frame_index=${frameIndex}&refresh=true`;
-  try {
-    state.candidates = await api(`/videos/${state.video.id}/candidates${query}`);
-  } catch (error) {
-    setStatus('pick-status', error.message, true);
-    return;
-  }
+function clearCandidateSelection() {
+  state.candidateRequest += 1;
+  state.candidates = null;
   state.selected = null;
+  state.frameReady = false;
   $('analyse').disabled = true;
-  renderCandidates();
+  $('other-frame').disabled = true;
+  $('frame-wrap').hidden = true;
+  $('cand-frame').removeAttribute('src');
+  $('frame-wrap').querySelectorAll('.cand').forEach((el) => el.remove());
+}
+
+function updateModelHint() {
+  const model = state.config?.pose_models.find((entry) => entry.id === $('pose-model').value);
+  $('detect-people').disabled = !model?.available;
+  $('model-hint').textContent = !model?.available ? (model?.unavailable_reason || 'Select an installed model.') :
+    (model.id === 'vitpose' ? 'Experimental: about 9× Heavy CPU cost in our test. First use downloads weights. ' : '') +
+    'This model will detect people and analyse the selected climber. Jobs run one at a time.';
+}
+
+function prepareCandidates() {
+  clearCandidateSelection();
+  show('s-pick', true);
+  updateModelHint();
+  setStatus('pick-status', 'Choose a model, then click Detect people.');
+}
+
+$('pose-model').addEventListener('change', prepareCandidates);
+$('detect-people').addEventListener('click', () => loadCandidates());
+
+async function loadCandidates(frameIndex) {
+  clearCandidateSelection();
+  const requestId = state.candidateRequest;
+  const videoId = state.video.id;
+  const model = $('pose-model').value;
+  show('s-pick', true);
+  $('detect-people').disabled = true;
+  setStatus('pick-status', 'Detecting people…');
+  const query = new URLSearchParams({pose_model: model});
+  if (frameIndex !== undefined) {
+    query.set('frame_index', frameIndex);
+    query.set('refresh', 'true');
+  }
+  try {
+    const candidates = await api(`/videos/${videoId}/candidates?${query}`);
+    if (requestId !== state.candidateRequest || videoId !== state.video.id) return;
+    state.candidates = candidates;
+    renderCandidates();
+  } catch (error) {
+    if (requestId !== state.candidateRequest) return;
+    setStatus('pick-status', error.message, true);
+  } finally {
+    if (requestId === state.candidateRequest) updateModelHint();
+  }
 }
 
 function renderCandidates() {
   const data = state.candidates;
-  $('cand-frame').src = `${data.frame_url}?t=${Date.now()}`;
+  const img = $('cand-frame');
+  img.onload = () => {
+    if (state.candidates !== data) return;
+    state.frameReady = true;
+    $('frame-wrap').hidden = false;
+    $('other-frame').disabled = false;
+    $('analyse').disabled = state.selected === null;
+  };
+  img.onerror = () => {
+    if (state.candidates !== data) return;
+    clearCandidateSelection();
+    setStatus('pick-status', 'Candidate frame changed or could not load. Detect people again.', true);
+  };
+  img.src = `${data.frame_url}?selection_id=${encodeURIComponent(data.selection_id)}&t=${Date.now()}`;
 
   const wrap = $('frame-wrap');
   wrap.querySelectorAll('.cand').forEach((el) => el.remove());
@@ -304,7 +374,7 @@ function selectCandidate(index) {
   $('frame-wrap').querySelectorAll('.cand').forEach((el, position) => {
     el.classList.toggle('selected', position === index);
   });
-  $('analyse').disabled = false;
+  $('analyse').disabled = !state.frameReady;
 }
 
 $('other-frame').addEventListener('click', () => {
@@ -317,6 +387,7 @@ $('other-frame').addEventListener('click', () => {
 // ----------------------------------------------------------------- analysis
 
 $('analyse').addEventListener('click', async () => {
+  if (!state.candidates || !state.frameReady || state.selected === null) return;
   $('analyse').disabled = true;
   show('s-progress', true);
   show('s-play', false);
@@ -326,7 +397,8 @@ $('analyse').addEventListener('click', async () => {
     const job = await api(`/videos/${state.video.id}/analyse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidate_index: state.selected }),
+      body: JSON.stringify({ candidate_index: state.selected,
+        pose_model: state.candidates.pose_model, selection_id: state.candidates.selection_id }),
     });
     pollJob(job.id, job.analysis_run_id);
     await refreshAnalysisRuns(job.analysis_run_id);
@@ -430,6 +502,9 @@ async function showResult(analysisRunId = null) {
   $('hud-total').textContent = state.keypoints.frame_count;
 
   const player = $('player');
+  lastHudFrame = -1;
+  player.style.aspectRatio = `${video.width} / ${video.height}`;
+  $('skeleton-stage').style.aspectRatio = `${video.width} / ${video.height}`;
   const hasFootage = video.has_footage;
   show('stage', hasFootage);
   show('no-footage', !hasFootage);
@@ -451,7 +526,7 @@ async function showResult(analysisRunId = null) {
   renderMeta();
   drawCharts();
   updateRetentionNote();
-  requestAnimationFrame(drawOverlay);
+  drawOverlay();
 }
 
 function renderMeta() {
@@ -555,22 +630,25 @@ function currentFrameIndex() {
 }
 
 function drawOverlay() {
-  requestAnimationFrame(drawOverlay);
   const data = state.keypoints;
   if (!data || !state.video || !state.video.has_footage) return;
 
   const player = $('player');
-  const canvas = $('overlay');
-  const scale = sizeCanvas(canvas, player.clientWidth, player.clientHeight);
-  const context = canvas.getContext('2d');
-  context.clearRect(0, 0, canvas.width, canvas.height);
-
   const index = currentFrameIndex();
   updateHud(index);
   drawPlayhead(index);
 
   const source = $('smooth').checked && state.smoothed ? state.smoothed : data.frames;
   const landmarks = source[index];
+  drawSkeleton($('overlay'), player.clientWidth, player.clientHeight, landmarks, data.landmark_connections);
+  const right = $('skeleton-stage');
+  drawSkeleton($('skeleton-only'), right.clientWidth, right.clientHeight, landmarks, data.landmark_connections);
+}
+
+function drawSkeleton(canvas, width, height, landmarks, connections) {
+  const scale = sizeCanvas(canvas, width, height);
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, canvas.width, canvas.height);
   if (!landmarks) return;   // A gap draws nothing. Never interpolated across.
 
   const toX = (x) => x * canvas.width;
@@ -578,7 +656,7 @@ function drawOverlay() {
 
   context.lineWidth = 2.5 * scale;
   context.lineCap = 'round';
-  for (const [start, end] of data.landmark_connections) {
+  for (const [start, end] of connections) {
     const a = landmarks[start];
     const b = landmarks[end];
     if (!a || !b) continue;
@@ -598,6 +676,13 @@ function drawOverlay() {
     context.fill();
   }
 }
+
+// One clock and one animation loop for both panels, including after run changes.
+function animateOverlays() {
+  drawOverlay();
+  requestAnimationFrame(animateOverlays);
+}
+requestAnimationFrame(animateOverlays);
 
 let lastHudFrame = -1;
 function updateHud(index) {
@@ -628,7 +713,7 @@ $('step-back').addEventListener('click', () => stepFrame(-1));
 $('step-fwd').addEventListener('click', () => stepFrame(1));
 document.addEventListener('keydown', (event) => {
   if ($('s-play').hidden) return;
-  if (event.target.tagName === 'INPUT') return;
+  if (['INPUT', 'SELECT', 'BUTTON'].includes(event.target.tagName)) return;
   if (event.key === 'ArrowLeft') { stepFrame(-1); event.preventDefault(); }
   if (event.key === 'ArrowRight') { stepFrame(1); event.preventDefault(); }
 });
@@ -845,12 +930,11 @@ function updateRetentionNote() {
   state.retentionTick = setInterval(render, 10000);
 }
 
-$('repick').addEventListener('click', async () => {
-  // Straight back to the picker on the frame the last choice came from, so a
-  // track that followed the wrong person can be redone without re-uploading.
-  const stored = state.candidates ? state.candidates.frame_index : undefined;
+$('repick').addEventListener('click', () => {
+  // Model choice comes before any new inference, including repeat analyses.
+  $('player').pause();
   show('s-play', false);
-  await loadCandidates(stored);
+  prepareCandidates();
   $('s-pick').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 

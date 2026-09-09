@@ -43,7 +43,8 @@ from app.db.repository import (
 from app.frames import FrameReadError
 from app.ingest.errors import IngestError
 from app.ingest.service import IngestService
-from app.jobs.service import JobService, UnknownCandidate
+from app.jobs.service import JobService, UnknownCandidate, StaleSelection
+from app.pose.catalog import ModelUnavailable
 from app.keypoints import KeypointStore
 from app.retention import FootageRetention
 from app.ingest.upload import EmptyUpload, UploadTooLarge, save_stream
@@ -209,12 +210,16 @@ def get_candidates(
 @router.get("/{video_id}/candidates/frame.jpg")
 def get_candidate_frame(
     video_id: str,
+    selection_id: str | None = Query(None),
     repository: VideoRepository = Depends(get_video_repository),
     service: CandidateService = Depends(get_candidate_service),
 ) -> FileResponse:
     """The frame the candidates were detected in, for the client to draw on."""
     record = _require_video(repository, video_id)
-    path = service.frame_path(record)
+    candidates = repository.get_candidates(video_id)
+    if selection_id is not None and (candidates is None or candidates.selection_id != selection_id):
+        raise HTTPException(409, detail='candidate selection changed; detect and select again')
+    path = service.frame_path(record, candidates)
     if not path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -237,11 +242,18 @@ def analyse_video(
     """
     _require_ready(_require_video(repository, video_id))
     try:
-        job = service.submit(video_id, request.candidate_index)
+        job = service.submit(video_id, request.candidate_index, pose_model=request.pose_model,
+                             selection_id=request.selection_id)
+    except StaleSelection as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except ModelUnavailable as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
     except UnknownCandidate as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
     return JobOut.from_record(job)
 
 

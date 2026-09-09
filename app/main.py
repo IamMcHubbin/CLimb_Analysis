@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +18,9 @@ from app.db.sqlalchemy_repository import SqlAlchemyJobRepository
 from app.jobs.runtime import build_queue, set_queue
 from app.jobs.service import recover_unfinished_jobs
 from app.retention import FootageRetention, RetentionJanitor
+from app.api.deps import get_settings
+from app.config import Settings
+from app.pose.catalog import model_choices
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -70,12 +73,14 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/config", tags=["ops"])
-    def client_config() -> dict[str, object]:
+    def client_config(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         """Limits the client needs to know, so they are stated in one place.
 
         Without this the upload cap would be written down twice and drift.
         """
         return {
+            "default_pose_model": settings.pose_model,
+            "pose_models": model_choices(),
             "max_upload_bytes": settings.max_upload_bytes,
             "target_fps": settings.target_fps,
             "max_long_edge": settings.max_long_edge,

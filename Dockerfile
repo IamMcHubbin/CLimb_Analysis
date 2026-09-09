@@ -20,6 +20,14 @@ WORKDIR /srv
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Opt-in test backend; ordinary images remain MediaPipe-only.
+ARG INSTALL_VITPOSE=false
+COPY requirements-vitpose.txt ./
+RUN if [ "$INSTALL_VITPOSE" = "true" ]; then \
+        pip install --no-cache-dir torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu \
+        && pip install --no-cache-dir -r requirements-vitpose.txt; \
+    fi
+
 COPY app ./app
 COPY scripts ./scripts
 COPY static ./static

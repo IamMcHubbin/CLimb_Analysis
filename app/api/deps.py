@@ -7,8 +7,9 @@ here and nowhere else.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import Settings, settings as app_settings
@@ -28,6 +29,7 @@ from app.jobs.service import JobService
 from app.keypoints import KeypointStore, ParquetKeypointStore
 from app.retention import FootageRetention
 from app.pose import RunningMode, create_pose_estimator
+from app.pose.catalog import ModelUnavailable, validate_model
 
 
 def get_settings() -> Settings:
@@ -50,8 +52,21 @@ def get_ingest_service(
     return IngestService(repository, settings=settings)
 
 
-def get_estimator_factory(
+def get_pose_settings(
+    pose_model: str | None = Query(None),
     settings: Settings = Depends(get_settings),
+) -> Settings:
+    try:
+        chosen = validate_model(pose_model or settings.pose_model)
+    except ModelUnavailable as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    return replace(settings, pose_model=chosen)
+
+
+def get_estimator_factory(
+    settings: Settings = Depends(get_pose_settings),
 ) -> EstimatorFactory:
     """Builds a single-frame pose estimator.
 
@@ -67,7 +82,7 @@ def get_estimator_factory(
 
 def get_candidate_service(
     repository: VideoRepository = Depends(get_video_repository),
-    settings: Settings = Depends(get_settings),
+    settings: Settings = Depends(get_pose_settings),
     estimator_factory: EstimatorFactory = Depends(get_estimator_factory),
 ) -> CandidateService:
     return CandidateService(repository, settings=settings, estimator_factory=estimator_factory)

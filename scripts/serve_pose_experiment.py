@@ -77,11 +77,12 @@ def main():
     def recorded_factory(**kwargs):
         started = time.perf_counter()
         inner = original_factory(**kwargs)
+        model = kwargs.get('variant') or getattr(kwargs.get('settings'), 'pose_model', args.model)
         # Unique time-based path; never overwrite an earlier recording.
-        destination = args.records_dir / f'{args.model}-{time.time_ns()}.jsonl.gz'
+        destination = args.records_dir / f'{model}-{time.time_ns()}.jsonl.gz'
         handle = gzip.open(destination, 'wt', encoding='utf-8')
         handle.write(json.dumps({
-            'model': args.model, 'mode': kwargs.get('mode', pose.RunningMode.VIDEO).value,
+            'model': model, 'mode': kwargs.get('mode', pose.RunningMode.VIDEO).value,
             'landmark_names': inner.landmark_names,
             'landmark_connections': inner.landmark_connections,
             'load_seconds': time.perf_counter() - started,
