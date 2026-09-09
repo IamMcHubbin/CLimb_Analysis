@@ -268,6 +268,11 @@ container and `./data`. The batch file controls the local Docker app only. If a
 Quick Tunnel is running in another window, press **Ctrl+C** there separately to
 make its public URL stop working.
 
+To make the experimental ViTPose model selectable on this machine, copy
+`.env.example` to `.env` and set `INSTALL_VITPOSE=true` before choosing Start.
+That local file is ignored by Git. Leave it false for the smaller MediaPipe-only
+image.
+
 For an interactive Quick Tunnel, **Ctrl+C** stops public access without stopping
 Docker. Restart it with `cloudflared tunnel --url http://localhost:8000` and
 share the newly generated URL. A permanent Windows tunnel installed as a

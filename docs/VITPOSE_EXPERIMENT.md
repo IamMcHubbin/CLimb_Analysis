@@ -86,6 +86,11 @@ docker compose build --build-arg INSTALL_VITPOSE=true app
 docker compose up -d --no-build
 ```
 
+For a persistent local choice (including when using `climb-server.bat`), copy
+`.env.example` to `.env`, change `INSTALL_VITPOSE=false` to `true`, and use the
+normal start command. `.env` is deliberately ignored by Git, so each machine
+can choose whether to carry the much larger experimental dependencies.
+
 This installs CPU dependencies but leaves Heavy as the compose default.
 First ViTPose use downloads the pinned checkpoints through Hugging Face.
 The weight cache must be persisted separately if it should survive container

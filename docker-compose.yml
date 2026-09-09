@@ -1,6 +1,10 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # Override in an ignored local .env; see .env.example.
+        INSTALL_VITPOSE: ${INSTALL_VITPOSE:-false}
     restart: unless-stopped
     ports:
       - "8000:8000"
