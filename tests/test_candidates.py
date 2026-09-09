@@ -112,6 +112,28 @@ def test_asking_for_another_frame_re_detects(settings, repository, video):
     assert other.frame_index == 3
 
 
+def test_re_detecting_removes_the_previous_still(settings, repository, video):
+    """Only one candidate set is stored, so earlier stills are unreachable.
+
+    Left alone they would accumulate on every model switch and survive until
+    footage retention removed the whole directory - a week on a personal
+    instance.
+    """
+    estimator = FakeEstimator([_person(0.1, 0.1, 0.2)])
+    service = CandidateService(repository, settings, estimator_factory=_factory(estimator))
+
+    first = service.detect(video)
+    first_still = service.frame_path(video, first)
+    second = service.detect(video, frame_index=3)
+    second_still = service.frame_path(video, second)
+
+    assert first_still != second_still
+    assert not first_still.exists()
+    assert second_still.exists()
+    stills = list(second_still.parent.glob("candidate_*.jpg"))
+    assert stills == [second_still]
+
+
 def test_frame_index_is_clamped_to_the_clip(settings, repository, video):
     estimator = FakeEstimator([])
     service = CandidateService(repository, settings, estimator_factory=_factory(estimator))

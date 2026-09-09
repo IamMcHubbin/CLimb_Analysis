@@ -89,13 +89,22 @@ class JobService:
         if candidates is None:
             raise UnknownCandidate("no candidates for this video; call /candidates first")
         chosen_model = validate_model(pose_model or self._settings.pose_model)
-        # Explicit-model clients must bind to the exact picker response. Older
-        # index-only clients retain default-model behavior, never cross-model reuse.
-        if (pose_model is not None and selection_id is None
-                or selection_id is not None and selection_id != candidates.selection_id
-                or candidates.pose_model is not None and candidates.pose_model != chosen_model
-                or pose_model is not None and candidates.pose_model is None):
-            raise StaleSelection('candidate selection changed or belongs to another model; detect and select again')
+        # A candidate index only means something against the detection run that
+        # produced it, so a client naming a model has to name the exact picker
+        # response it is answering. Clients that send neither keep the old
+        # index-only behaviour on the default model; what is never allowed is
+        # analysing one model's boxes under another model.
+        names_model = pose_model is not None
+        unbound = names_model and selection_id is None
+        superseded = selection_id is not None and selection_id != candidates.selection_id
+        crosses_models = (
+            candidates.pose_model is not None and candidates.pose_model != chosen_model
+        )
+        predates_model_choice = names_model and candidates.pose_model is None
+        if unbound or superseded or crosses_models or predates_model_choice:
+            raise StaleSelection(
+                "candidate selection changed or belongs to another model; detect and select again"
+            )
         candidate = candidates.get(candidate_index)
         if candidate is None:
             available = [entry.index for entry in candidates.candidates]

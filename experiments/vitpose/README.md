@@ -1,17 +1,19 @@
 # ViTPose+ experiment: climbing self-occlusion
 
-> Historical measurement report. On 8 September the user approved retaining
-> this as an optional backend, with model choice before computation and a
-> skeleton-only panel to the right of the video. References below to unchanged
-> API/frontend and model-blind caching describe the measured experiment commit,
-> not the subsequent selectable-model implementation. Accuracy conclusions and
-> measurements are unchanged; this is still not a recommendation to make
-> ViTPose the default.
+> **What happened after this was written.** The report below was produced as
+> a keep-or-drop experiment and originally said not to merge it. It was then
+> merged deliberately: on 8 September the owner chose to keep ViTPose as an
+> **opt-in** backend, with the model chosen before computation and a
+> skeleton-only panel beside the video. That decision does not change any
+> measurement or conclusion here, and it did not make ViTPose the default -
+> MediaPipe Heavy still is. Where the text below says the API, frontend and
+> candidate caching are unchanged, it is describing the measured commit, not
+> the selectable-model work that followed it.
 
 Measured 7 September 2026; report completed 8 September. Base:
-`ed0cd39508aa9d7e6b33c187409eebf4d442ffe3`. Experimental branch:
-`codex/vitpose-experiment`. **Do not merge or change the default on the
-strength of this experiment.**
+`ed0cd39508aa9d7e6b33c187409eebf4d442ffe3`. Measured on branch
+`codex/vitpose-experiment`. **These numbers do not justify making ViTPose the
+default**, which is why it ships opt-in and clearly labelled with its cost.
 
 ## Verdict
 

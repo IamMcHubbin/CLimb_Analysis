@@ -218,7 +218,10 @@ def get_candidate_frame(
     record = _require_video(repository, video_id)
     candidates = repository.get_candidates(video_id)
     if selection_id is not None and (candidates is None or candidates.selection_id != selection_id):
-        raise HTTPException(409, detail='candidate selection changed; detect and select again')
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="candidate selection changed; detect and select again",
+        )
     path = service.frame_path(record, candidates)
     if not path.exists():
         raise HTTPException(

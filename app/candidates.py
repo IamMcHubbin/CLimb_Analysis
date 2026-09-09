@@ -55,11 +55,32 @@ class CandidateService:
         return create_pose_estimator(mode=RunningMode.IMAGE, settings=self._settings)
 
     def frame_path(self, video: VideoRecord, candidates: CandidateSet | None = None) -> Path:
-        """Where the rendered candidate frame is cached."""
+        """Where the rendered candidate frame is cached.
+
+        Keyed by selection so a re-detection cannot serve the previous run's
+        boxes drawn on it. Sets stored before model selection existed have no
+        selection id and keep the original filename.
+        """
         candidates = candidates or self._repository.get_candidates(video.id)
-        filename = (f'candidate_{candidates.selection_id}.jpg'
-                    if candidates and candidates.selection_id else CANDIDATE_FRAME_FILENAME)
+        filename = (
+            f"candidate_{candidates.selection_id}.jpg"
+            if candidates and candidates.selection_id
+            else CANDIDATE_FRAME_FILENAME
+        )
         return self._settings.resolve(video.stored_path).parent / filename
+
+    def _discard_superseded_frames(self, keeping: Path) -> None:
+        """Remove candidate stills the database no longer points at.
+
+        Only one candidate set is stored per video, so every earlier
+        selection's still - and the pre-selection ``candidate_frame.jpg`` -
+        is unreachable the moment this one is saved. They would otherwise sit
+        there until footage retention removed the whole directory, which on a
+        personal instance can be a week away.
+        """
+        for stale in keeping.parent.glob("candidate_*.jpg"):
+            if stale != keeping:
+                stale.unlink(missing_ok=True)
 
     def default_frame_index(self, video: VideoRecord) -> int:
         return max(0, video.frame_count // 2)
@@ -150,6 +171,7 @@ class CandidateService:
         destination = self.frame_path(video, candidate_set)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(encode_jpeg(frame))
+        self._discard_superseded_frames(destination)
 
         self._repository.save_candidates(video.id, candidate_set)
         logger.info(
