@@ -253,7 +253,8 @@ docker compose up -d --build        # build changes and leave it running
 docker compose down                 # remove the container; ./data still survives
 ```
 
-On Windows, the included `climb-server.bat` wraps the everyday commands:
+On Windows, double-click the included `climb-server.bat` to open a Start,
+Stop, Restart and Status menu. It also accepts command-line arguments:
 
 ```bat
 climb-server.bat start
