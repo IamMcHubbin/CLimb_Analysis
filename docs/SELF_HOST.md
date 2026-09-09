@@ -254,19 +254,33 @@ docker compose down                 # remove the container; ./data still survive
 ```
 
 On Windows, double-click the included `climb-server.bat` to open a Start,
-Stop, Restart and Status menu. It also accepts command-line arguments:
+Stop, Restart, Status and Share menu. It also accepts command-line arguments:
 
 ```bat
 climb-server.bat start
 climb-server.bat stop
 climb-server.bat restart
 climb-server.bat status
+climb-server.bat share
 ```
 
 `start` builds any changed image and starts the app; `stop` preserves both the
-container and `./data`. The batch file controls the local Docker app only. If a
-Quick Tunnel is running in another window, press **Ctrl+C** there separately to
-make its public URL stop working.
+container and `./data`.
+
+`share` opens a Cloudflare Quick Tunnel and **prints the public address**.
+That address is randomly generated each time the tunnel starts and is
+forgotten when it stops, so reading it out of cloudflared's output is the only
+way to know it - which is what the launcher does for you. `start`, `restart`
+and `status` also reprint the current address whenever a tunnel is already
+running, so it is never lost by clearing the window.
+
+A Quick Tunnel needs `cloudflared` installed (`winget install --id
+Cloudflare.cloudflared`) and needs no domain or Cloudflare account. It is also
+**unauthenticated**: the app has no login, so anyone with the link can upload
+clips and spend your CPU. Prefer it for short sessions, and use `stop` - which
+closes the tunnel as well as the container - rather than leaving it up. For a
+stable address with a login in front of it, use the named tunnel and
+Cloudflare Access described above instead.
 
 To make the experimental ViTPose model selectable on this machine, copy
 `.env.example` to `.env` and set `INSTALL_VITPOSE=true` before choosing Start.
