@@ -119,10 +119,23 @@ exit /b 0
 :: then greps, which is why this is not simply echoed.
 
 :run_share
-where cloudflared >nul 2>&1
+:: Running it, not just finding it. A name on PATH can be a zero-byte App
+:: Execution Alias stub, which resolves fine and then fails to launch with
+:: "Access is denied" - a confusing way to discover it was never installed.
+cloudflared --version >nul 2>&1
 if errorlevel 1 (
-    echo cloudflared is not installed. Install it with:
-    echo     winget install --id Cloudflare.cloudflared
+    where cloudflared >nul 2>&1
+    if errorlevel 1 (
+        echo cloudflared is not installed. Install it with:
+        echo     winget install --id Cloudflare.cloudflared
+    ) else (
+        echo cloudflared is on PATH but will not run. Usually this means the
+        echo entry is a Windows App Execution Alias rather than the real
+        echo program. Check which one was found:
+        echo     where.exe cloudflared
+        echo Then install the real binary and reopen this window:
+        echo     winget install --id Cloudflare.cloudflared
+    )
     exit /b 1
 )
 
@@ -149,9 +162,14 @@ del "%TUNNEL_LOG%" "%TUNNEL_OUT%" >nul 2>&1
 :: Launched through Start-Process rather than `cmd /c ... > file`: the log path
 :: sits under %TEMP%, which contains a space on any account whose user name
 :: does, and the nested quoting that redirect needs misparses there.
-powershell -NoProfile -Command "Start-Process -FilePath 'cloudflared' -ArgumentList 'tunnel','--url','http://localhost:8000' -RedirectStandardError '%TUNNEL_LOG%' -RedirectStandardOutput '%TUNNEL_OUT%' -WindowStyle Hidden"
+::
+:: -NoNewWindow, never -WindowStyle: redirecting the streams requires
+:: UseShellExecute=$false, and -WindowStyle requires it true. Asking for both
+:: fails, and the failure surfaces as a bare "Access is denied".
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; try { Start-Process -FilePath 'cloudflared' -ArgumentList 'tunnel','--url','http://localhost:8000' -RedirectStandardError '%TUNNEL_LOG%' -RedirectStandardOutput '%TUNNEL_OUT%' -NoNewWindow } catch { Write-Host $_.Exception.Message; exit 1 }"
 if errorlevel 1 (
-    echo Could not launch cloudflared.
+    echo.
+    echo Could not launch cloudflared. The message above is from Windows.
     exit /b 1
 )
 
