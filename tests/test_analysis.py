@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 
 import pytest
 
@@ -233,3 +234,116 @@ def test_progress_advances_while_running(settings, prepared):
     assert seen, "progress was never reported"
     assert seen == sorted(seen)
     assert max(seen) < 1.0  # 1.0 is only set when the job is marked done
+
+
+# ------------------------------------------------ reusing the tracked box
+
+class RoiAwareEstimator(ScriptedEstimator):
+    """Records the region it was asked to pose, and honours the script.
+
+    Stands in for a top-down model: given a region it poses that region, and
+    given none it searches. What it returns does not depend on the region -
+    the point of these tests is which regions it is handed, and what the
+    caller does with a reply it should not trust.
+    """
+
+    def __init__(self, per_frame, confidence: float = 0.9):
+        super().__init__(per_frame)
+        self.rois: list[object] = []
+        self._confidence = confidence
+
+    @property
+    def uses_roi_hint(self) -> bool:
+        return True
+
+    def detect(self, frame, timestamp_ms: int = 0, *, roi=None):
+        self.rois.append(roi)
+        people = super().detect(frame, timestamp_ms)
+        if self._confidence >= 0.9:
+            return people
+        return tuple(
+            PersonPose(
+                landmarks=tuple(
+                    Landmark(x=lm.x, y=lm.y, z=lm.z,
+                             visibility=self._confidence, presence=self._confidence)
+                    for lm in person.landmarks
+                )
+            )
+            for person in people
+        )
+
+
+def _roi_handler(settings, per_frame, confidence: float = 0.9):
+    estimator = RoiAwareEstimator(per_frame, confidence)
+
+    @contextmanager
+    def factory():
+        yield estimator
+
+    return AnalysisJobHandler(settings, estimator_factory=factory), estimator
+
+
+def test_the_tracked_box_is_not_reused_unless_it_is_turned_on(settings, prepared):
+    video, job = prepared
+    handler, estimator = _roi_handler(
+        settings, [[_four_point_person(0.4, 0.4)]] * video.frame_count
+    )
+
+    handler(job.id)
+
+    assert estimator.rois, "the estimator was never called"
+    assert all(roi is None for roi in estimator.rois)
+
+
+def test_reusing_the_box_still_searches_whole_frames_periodically(settings, prepared):
+    """Every Nth frame must be an independent look, or a drifted track is invisible."""
+    video, job = prepared
+    tuned = replace(settings, reuse_tracked_box=True, reanchor_frames=4)
+    handler, estimator = _roi_handler(
+        tuned, [[_four_point_person(0.4, 0.4)]] * video.frame_count
+    )
+
+    handler(job.id)
+
+    searched = sum(1 for roi in estimator.rois if roi is None)
+    posed = sum(1 for roi in estimator.rois if roi is not None)
+    assert posed > 0, "the hint was never used, so nothing was saved"
+    assert searched > 0, "every frame used the hint, so a lost track could never be noticed"
+
+
+def test_frames_before_the_seed_never_use_a_hint(settings, prepared):
+    """They are tracked backwards afterwards, so nothing yet knows where to look."""
+    video, job = prepared
+    tuned = replace(settings, reuse_tracked_box=True, reanchor_frames=1000)
+    handler, estimator = _roi_handler(
+        tuned, [[_four_point_person(0.4, 0.4)]] * video.frame_count
+    )
+
+    handler(job.id)
+
+    seed = video.frame_count // 2
+    assert all(roi is None for roi in estimator.rois[: seed + 1])
+
+
+def test_an_unconvincing_posed_region_becomes_a_gap(settings, prepared):
+    """A pose taken from the tracked box always fits it, so position cannot
+    reject it. Confidence is the only thing left that says the climber has
+    gone and the model is describing an empty wall."""
+    video, job = prepared
+    tuned = replace(
+        settings, reuse_tracked_box=True, reanchor_frames=1000, roi_min_visibility=0.8
+    )
+    handler, _ = _roi_handler(
+        tuned, [[_four_point_person(0.4, 0.4)]] * video.frame_count, confidence=0.1
+    )
+
+    handler(job.id)
+
+    with session_scope() as session:
+        stored = SqlAlchemyVideoRepository(session).get(video.id)
+    data = ParquetKeypointStore(tuned).read(stored.keypoints_path)
+    seed = video.frame_count // 2
+    # A gap is an absent row, so every frame past the seed should be missing.
+    after_seed = [index for index in range(seed + 1, video.frame_count)]
+    assert after_seed, "expected frames after the seed"
+    assert all(index not in data.frames for index in after_seed)

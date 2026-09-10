@@ -18,6 +18,23 @@ MODEL_LABELS = {
 
 _VITPOSE_REQUIREMENTS = ("torch", "torchvision", "transformers", "scipy")
 
+# Estimators that already pose one crop per person, rather than finding the
+# climber somewhere in a whole frame.
+_POSES_PER_PERSON_CROP = frozenset({"vitpose"})
+
+
+def benefits_from_refinement(model: str) -> bool:
+    """Whether a second, cropped pose pass improves this model's landmarks.
+
+    Refinement exists because MediaPipe sees the climber at whatever size they
+    are in shot - often a tenth of the frame - while the model wants a subject
+    that fills it. A top-down estimator is already given a crop of one person,
+    so the second pass re-crops an image that was never the problem. Measured
+    on the gym clip it made ViTPose's jitter worse in all three windows while
+    roughly doubling the job; see docs/VITPOSE_EXPERIMENT.md.
+    """
+    return model not in _POSES_PER_PERSON_CROP
+
 
 class ModelUnavailable(ValueError):
     pass

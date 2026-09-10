@@ -32,7 +32,7 @@ from app.db.repository import (
 from app.tracking import TrackingConfig
 from app.config import Settings, settings as default_settings
 from app.jobs.base import JobQueue
-from app.pose.catalog import validate_model
+from app.pose.catalog import benefits_from_refinement, validate_model
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,13 @@ class JobService:
                 max_gap_frames=self._tracking_config.max_gap_frames,
                 pose_model=chosen_model,
                 max_people=self._settings.max_people,
-                refine_landmarks=self._settings.refine_landmarks,
+                # A model that already poses a per-person crop gains nothing
+                # from a second cropped pass; recorded on the run so the
+                # artifact says which passes actually ran.
+                refine_landmarks=(
+                    self._settings.refine_landmarks
+                    and benefits_from_refinement(chosen_model)
+                ),
                 refine_margin=self._settings.refine_margin,
                 created_at=datetime.now(timezone.utc),
             )

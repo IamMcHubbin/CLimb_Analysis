@@ -308,6 +308,9 @@ queue.
 | `CLIMB_MAX_PEOPLE` | `5` | Maximum people detected per frame |
 | `CLIMB_REFINE_LANDMARKS` | `1` | Second pose pass on a crop around the tracked person |
 | `CLIMB_REFINE_MARGIN` | `0.55` | How much context to leave around that crop |
+| `CLIMB_REUSE_TRACKED_BOX` | `0` | Skip per-frame person detection once tracking has started (top-down models only) |
+| `CLIMB_REANCHOR_FRAMES` | `10` | With the above, search the whole frame every Nth frame anyway |
+| `CLIMB_ROI_MIN_VISIBILITY` | `0.3` | With the above, discard a posed region less confident than this |
 | `CLIMB_FFMPEG` / `CLIMB_FFPROBE` | `ffmpeg` / `ffprobe` | Binary paths |
 
 ## What it does on real footage

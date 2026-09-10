@@ -19,6 +19,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from app.geometry import BoundingBox
 from app.pose.base import Landmark, PersonPose, PoseEstimator, RunningMode
 
 POSE_MODEL = "usyd-community/vitpose-plus-base"
@@ -28,6 +29,11 @@ DETECTOR_REVISION = "ac77a11ff0170a41b771c03264987f8ce2b0d753"
 DETECTOR_THRESHOLD = 0.3
 COCO_PERSON_LABEL = 0
 COCO_DATASET_INDEX = 0
+
+# Grown around a supplied region before posing it. The hint says where the
+# climber was in the *previous* frame, and a box tight enough for that frame
+# clips the limbs that moved since.
+ROI_MARGIN = 0.2
 
 LANDMARK_NAMES = (
     "nose", "left_eye", "right_eye", "left_ear", "right_ear",
@@ -56,6 +62,19 @@ def _person_boxes(result, width: int, height: int, limit: int) -> np.ndarray:
     valid = (boxes[:, 2:] > 0).all(axis=1)
     boxes, scores = boxes[valid], scores[valid]
     return boxes[np.argsort(-scores, kind="stable")[:limit]]
+
+
+def _roi_box(roi: BoundingBox, width: int, height: int) -> np.ndarray:
+    """One normalised region as the pixel COCO xywh box the pose model wants."""
+    margin_x = roi.width * ROI_MARGIN
+    margin_y = roi.height * ROI_MARGIN
+    left = max(0.0, roi.x - margin_x) * width
+    top = max(0.0, roi.y - margin_y) * height
+    right = min(1.0, roi.x + roi.width + margin_x) * width
+    bottom = min(1.0, roi.y + roi.height + margin_y) * height
+    if right <= left or bottom <= top:
+        return np.zeros((0, 4), dtype=np.float32)
+    return np.array([[left, top, right - left, bottom - top]], dtype=np.float32)
 
 
 def _to_person(result, width: int, height: int) -> PersonPose:
@@ -121,7 +140,22 @@ class VitPoseEstimator(PoseEstimator):
     def landmark_connections(self) -> tuple[tuple[int, int], ...]:
         return LANDMARK_CONNECTIONS
 
-    def detect(self, frame_bgr: np.ndarray, timestamp_ms: int = 0) -> tuple[PersonPose, ...]:
+    @property
+    def uses_roi_hint(self) -> bool:
+        """Detection is the expensive half, and a hint lets it be skipped.
+
+        RT-DETR runs over the whole frame; the pose model runs over one
+        256x192 crop. Being handed the region removes the first entirely.
+        """
+        return True
+
+    def detect(
+        self,
+        frame_bgr: np.ndarray,
+        timestamp_ms: int = 0,
+        *,
+        roi: BoundingBox | None = None,
+    ) -> tuple[PersonPose, ...]:
         if self._closed:
             raise RuntimeError("ViTPose estimator is closed")
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3 or frame_bgr.dtype != np.uint8:
@@ -132,12 +166,19 @@ class VitPoseEstimator(PoseEstimator):
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         # Explicit CPU tensors and inference mode; no timestamp/identity cache.
         with self._torch.inference_mode():
-            inputs = self._detector_processor(images=rgb, return_tensors="pt")
-            result = self._detector_processor.post_process_object_detection(
-                self._detector(**inputs), target_sizes=[(height, width)],
-                threshold=DETECTOR_THRESHOLD,
-            )[0]
-            boxes = _person_boxes(result, width, height, self._num_poses)
+            if roi is None:
+                inputs = self._detector_processor(images=rgb, return_tensors="pt")
+                result = self._detector_processor.post_process_object_detection(
+                    self._detector(**inputs), target_sizes=[(height, width)],
+                    threshold=DETECTOR_THRESHOLD,
+                )[0]
+                boxes = _person_boxes(result, width, height, self._num_poses)
+            else:
+                # The caller already knows where to look, so the detector is
+                # skipped. What comes back is therefore a pose *of that
+                # region*, not evidence that the tracked person is still in
+                # it - the caller is responsible for checking that.
+                boxes = _roi_box(roi, width, height)
             if not len(boxes):
                 return ()
             inputs = self._pose_processor(images=rgb, boxes=[boxes], return_tensors="pt")

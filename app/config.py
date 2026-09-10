@@ -67,6 +67,23 @@ class Settings:
     refine_landmarks: bool = os.environ.get("CLIMB_REFINE_LANDMARKS", "1") not in ("0", "false", "no")
     refine_margin: float = float(os.environ.get("CLIMB_REFINE_MARGIN", "0.55"))
 
+    # Top-down estimators spend most of a frame finding people before posing
+    # them. Once tracking has started, where the climber is is already known,
+    # so the search can be skipped and the previous frame's box posed instead.
+    #
+    # Off by default, because it trades away an independent opinion. Normally
+    # each frame's detections are found without reference to the track, and a
+    # frame with no convincing match becomes a gap; a pose taken *from* the
+    # tracked box will always sit inside it and so always matches, which would
+    # let a lost track quietly continue. The two settings below bound that:
+    # every Nth frame searches the whole frame regardless, and a posed region
+    # whose landmarks are less confident than the floor is discarded rather
+    # than believed. Both need checking against a real clip - compare tracked
+    # frame counts with this on and off before trusting it.
+    reuse_tracked_box: bool = os.environ.get("CLIMB_REUSE_TRACKED_BOX", "0") not in ("0", "false", "no")
+    reanchor_frames: int = _env_int("CLIMB_REANCHOR_FRAMES", 10)
+    roi_min_visibility: float = float(os.environ.get("CLIMB_ROI_MIN_VISIBILITY", "0.3"))
+
     @property
     def videos_dir(self) -> Path:
         return self.data_dir / "videos"

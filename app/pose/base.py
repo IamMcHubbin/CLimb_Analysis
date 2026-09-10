@@ -106,11 +106,31 @@ class PoseEstimator(abc.ABC):
     def num_landmarks(self) -> int:
         return len(self.landmark_names)
 
+    @property
+    def uses_roi_hint(self) -> bool:
+        """Whether ``detect`` accepts a ``roi`` telling it where to look.
+
+        Only top-down estimators - the ones that find people first and then
+        pose each one - can save anything by being told where the person is,
+        because it lets them skip finding them. An estimator that says True
+        here must accept ``roi`` as a keyword argument. Callers must not pass
+        ``roi`` to one that says False, which is the default, so existing
+        implementations keep working untouched.
+        """
+        return False
+
     @abc.abstractmethod
     def detect(self, frame_bgr, timestamp_ms: int = 0) -> tuple[PersonPose, ...]:
         """Detect every person in a BGR frame (the layout OpenCV decodes into).
 
         In VIDEO mode ``timestamp_ms`` must increase between calls.
+
+        Implementations advertising ``uses_roi_hint`` also accept a keyword
+        ``roi: BoundingBox | None``. Given one, they may pose only that region
+        and skip their own search; given None they must search the whole frame
+        as usual. A caller relying on this has to accept that the result is no
+        longer an independent opinion about where the person is - see the
+        re-anchoring in ``app.analysis``.
         """
 
     def close(self) -> None:

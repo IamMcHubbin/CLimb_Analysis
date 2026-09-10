@@ -186,12 +186,22 @@ class AnalysisJobHandler:
             landmark_names = estimator.landmark_names
             landmark_connections = estimator.landmark_connections
 
+            # Only worth doing for an estimator that searches before it poses,
+            # and only after the seed: frames before it are tracked backwards
+            # later, so nothing yet knows where the climber was in them.
+            reuse_box = self._settings.reuse_tracked_box and estimator.uses_roi_hint
+
             for frame_index, frame in reader:
                 if frame_index >= video.frame_count:
                     break
-                people = estimator.detect(
-                    frame, timestamp_ms_for_frame(frame_index, video.fps)
-                )
+                timestamp = timestamp_ms_for_frame(frame_index, video.fps)
+                roi = self._roi_hint(reuse_box, forward, frame_index, seed_index)
+                if reuse_box:
+                    people = estimator.detect(frame, timestamp, roi=roi)
+                    if roi is not None:
+                        people = self._confident_enough(people)
+                else:
+                    people = estimator.detect(frame, timestamp)
                 if frame_index < seed_index:
                     # Held for the backward pass; tracking these needs an
                     # anchor that does not exist until the seed frame.
@@ -219,6 +229,39 @@ class AnalysisJobHandler:
             landmark_names=landmark_names,
             landmark_connections=landmark_connections,
         )
+
+    def _roi_hint(
+        self,
+        reuse_box: bool,
+        tracker: IouTracker,
+        frame_index: int,
+        seed_index: int,
+    ) -> BoundingBox | None:
+        """Where to pose this frame, or None to search the whole frame.
+
+        Returns None before and at the seed, once the track is lost, and on
+        every re-anchor frame. The re-anchor is the important one: posing the
+        tracked box produces a pose inside that box, which the tracker then
+        matches against itself, so a track that has drifted onto the wall or
+        onto somebody else has no way to notice. Searching the frame properly
+        every Nth frame bounds how long that can go unnoticed.
+        """
+        if not reuse_box or frame_index <= seed_index or tracker.is_lost:
+            return None
+        interval = max(1, self._settings.reanchor_frames)
+        if (frame_index - seed_index) % interval == 0:
+            return None
+        return tracker.reference_box
+
+    def _confident_enough(self, people: tuple[PersonPose, ...]) -> tuple[PersonPose, ...]:
+        """Drop a posed region the model is not confident actually holds a body.
+
+        A pose taken from a supplied box always fits that box, so the tracker
+        cannot reject it on position. Confidence is the only signal left that
+        the climber has left and the model is describing an empty wall.
+        """
+        floor = self._settings.roi_min_visibility
+        return tuple(person for person in people if person.mean_visibility >= floor)
 
     def _refine(
         self,

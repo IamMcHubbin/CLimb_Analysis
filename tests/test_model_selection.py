@@ -118,7 +118,10 @@ def test_two_models_queue_together_and_worker_uses_each_snapshot(setup, settings
     handler = AnalysisJobHandler(replace(settings, pose_model='full'))
     for job in jobs:
         handler(job['id'])
-    assert seen == ['heavy', 'heavy', 'vitpose', 'vitpose']  # first pass + refinement
+    # Heavy runs twice, first pass then refinement. ViTPose runs once: it
+    # already poses a per-person crop, so the cropped second pass measurably
+    # made it worse while roughly doubling the job.
+    assert seen == ['heavy', 'heavy', 'vitpose']
     exports = [client.get(f'/videos/{video.id}/keypoints', params={
         'analysis_run_id': j['analysis_run_id']}).json() for j in jobs]
     assert [e['pose_model'] for e in exports] == ['heavy', 'vitpose']

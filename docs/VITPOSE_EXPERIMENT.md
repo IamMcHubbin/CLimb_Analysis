@@ -97,6 +97,48 @@ The weight cache must be persisted separately if it should survive container
 replacement. Rebuilding without the build argument returns to a MediaPipe-only
 image; completed ViTPose runs remain viewable without its runtime installed.
 
+## Making it faster
+
+Two changes address the 8.7x cost. The first is on; the second is opt-in
+because it has not been checked against real footage yet.
+
+**No refinement pass (on by default).** Crop refinement exists so MediaPipe
+gets a subject that fills the frame. ViTPose is already handed one crop per
+person, so the second pass re-crops an image that was never the problem - and
+the measurements above show it made ViTPose's jitter *worse* in all three
+windows while roughly doubling the job (9.2 minutes of first-pass inference
+became an observed 17m40s). A run now records `refine_landmarks=false` for
+ViTPose, so the artifact says which passes actually ran.
+
+**Reusing the tracked box (`CLIMB_REUSE_TRACKED_BOX=1`, off by default).**
+Each frame currently runs RT-DETR over the whole 720x1280 image to find people
+the tracker already knows the position of. Given `roi`, the estimator skips
+detection and poses that region instead. How much this saves depends on the
+detector/pose split, which **has never been measured separately** - profile
+that first, since it decides whether this is worth 2x or 20%.
+
+It is off by default because it trades away something real. Normally each
+frame's detections are found without reference to the track, and a frame with
+no convincing match becomes a gap. A pose taken *from* the tracked box always
+sits inside that box, so the tracker matches it against itself and a track
+that has drifted onto the wall - or onto somebody else - cannot notice. Two
+things bound that, and both need calibrating on a real clip:
+
+- `CLIMB_REANCHOR_FRAMES` (default 10) searches the whole frame every Nth
+  frame regardless, so a drifted track is caught within N frames.
+- `CLIMB_ROI_MIN_VISIBILITY` (default 0.3) discards a posed region the model
+  is not confident holds a body. ViTPose's scores are raw heatmap confidence,
+  not calibrated probabilities, so this threshold is a guess until measured.
+
+Before trusting it, run the same clip with it on and off and compare tracked
+frame counts per window. The number that must not move is the one this whole
+proof of concept rests on: frames tracking the wrong person.
+
+Not addressed here, and worth more than either of the above if foot placement
+is the goal: COCO-17 has no heel or toe, so ViTPose as configured cannot
+express foot orientation at all. MediaPipe has both. COCO-WholeBody adds six
+foot keypoints if that matters more than speed.
+
 ## Reproduce measurements
 
 Use the *same normalized file*, FPS and resolution for every model. Run timing
